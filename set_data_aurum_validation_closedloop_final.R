@@ -10,6 +10,10 @@ library(broom)
 library(ggplotify)
 library(patchwork)
 library(scales)
+library(forcats)
+
+output_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2023_SGLT2DPP4Aurum/results/" 
+
 #### Data prep (run once only) ####
 
 #Adapt from Pedros code (see Projects\2019_SGLT2vsDPP4\scripts\aurum_validation\set_data_aurum_validation.R)
@@ -717,9 +721,8 @@ hte_model <- function(data) {
 #Forest plot for calibration comparison within ethnicity
 fp_plot <- function(coef,cim,cip) {
   tick <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
-  row_names <- matrix(c("Predicted SGLT2i benefit",">5 mmol/mol", "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i benefit","0-3 mmol/mol", ">3 mmol/mol"))
-  
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
   fp <-
     forestplot(row_names,
                mean = coef,
@@ -758,9 +761,8 @@ fp_plot <- function(coef,cim,cip) {
 #Forest plot for calibration comparison by ethnicity
 fp_plot.eth <- function(coef,cim,cip) {
   tick <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
-  row_names <- matrix(c("Predicted SGLT2i benefit",">5 mmol/mol", "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i benefit","0-3 mmol/mol", ">3 mmol/mol"))
-  
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
   fp <-
     forestplot(row_names,
                mean = coef,
@@ -804,7 +806,7 @@ formula3 <- "posthba1c_final~factor(drugclass)+rcs(prehba1cmmol,3)+ncurrtx+drugl
 modelname <- c("unadj","simple","full")
 f <- as.list(c(formula1,formula2,formula3))
 
-#### Select required varaiables for each validation ####
+#### Define each of the HbA1c, weight and discontinuation cohorts ####
 
 #HbA1c cohort
 final.hb <- final.dataset %>%
@@ -892,9 +894,8 @@ final.dc <- final.dataset %>%
   
   
   tick <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
-  row_names <- matrix(c("Predicted SGLT2i benefit",">5 mmol/mol (n=42,057)", "3-5 mmol/mol (n=19,808)","0-3 mmol/mol (n=21,171)",
-                        "Predicted DPP4i benefit","0-3 mmol/mol (n=10,244)", ">3 mmol/mol (n=4,207)"))
-  
+  row_names <- matrix(c("Predicted SGLT2i benefit",paste0(intToUtf8(8805),">5 mmol/mol (n=42,057)"), "3-5 mmol/mol (n=19,808)","0-3 mmol/mol (n=21,171)",
+                        "Predicted DPP4i benefit","0-3 mmol/mol (n=10,244)",paste0(intToUtf8(8805),"3 mmol/mol (n=4,207)")))
   # pdf.options(reset = TRUE, onefile = FALSE)
   # pdf("treatmenteffectval(3).pdf",width=8,height=6)
   fp <-
@@ -1929,6 +1930,20 @@ c.benefit + 1.96*c.benefit.se
                                   hba1c_diff.recal = SGLT2.pred.lm.recal-DPP4.pred.lm.recal,
                                   bestdrug.recal=ifelse(hba1c_diff.recal<=0,"SGLT2","DPP4"))
   
+  #Generate other variables for modelling
+  
+  #Collapse ethnicity
+  final.dc <- final.dc %>% mutate(ethnicity.backup = ethnicity,
+                                  ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
+  describe(final.dc$ethnicity)
+  
+  #Define hba1c.breaks based on recalibrated HbA1c outcome
+  final.dc <- final.dc %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal)-0.01,-5,-3,0,3,max(hba1c_diff.recal)+0.01)))
+  describe(final.dc$hba1c.breaks)
+  
+  #Define datadist for modelling
+  ddist <- datadist(final.dc); options(datadist='ddist') 
+  
 #Predicted discontination from GOLD model (after HbA1c recalibration)  
   
   #Rename to allow fit of GOLD model
@@ -1946,10 +1961,10 @@ c.benefit + 1.96*c.benefit.se
   hist(final.dc$preddisdiffsglt2dpp4)
 
   #Plot mean and 95% interval of prediction by ethnicity and HbA1c defined subgroup
-  white <- final.dc %>% filter(ethnicity=="White") 
+  white <- final.dc %>% filter(ethnicity=="White")
   asian <- final.dc %>% filter(ethnicity=="South Asian")
-  black <- final.dc %>% filter(ethnicity=="Black") 
-  mixed.other <- final.dc %>% filter(ethnicity=="Mixed"|ethnicity=="Other") 
+  black <- final.dc %>% filter(ethnicity=="Black")
+  mixed.other <- final.dc %>% filter(ethnicity=="mixed.other")
   
   L <- list(white,asian,black,mixed.other)
   
@@ -2003,8 +2018,8 @@ c.benefit + 1.96*c.benefit.se
     
     #plot
     tick <- c(0,5,10,15,20,25,30,35,40)
-    row_names <- matrix(c("Predicted SGLT2i glycaemic benefit","5 mmol/mol", "3-5 mmol/mol","0-3 mmol/mol",
-                          "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", ">3 mmol/mol"))
+    row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                          "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
     coef = data.matrix(cbind(final.dis6m.p[,2]*100,final.dis6m.p[,5]*100))
     cim = data.matrix(cbind(final.dis6m.p[,3]*100,final.dis6m.p[,6]*100))
     cip = data.matrix(cbind(final.dis6m.p[,4]*100,final.dis6m.p[,7]*100))
@@ -2055,21 +2070,276 @@ c.benefit + 1.96*c.benefit.se
   dc.res[4]
   
   pdf.options(reset = TRUE, onefile = FALSE)
-  pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/dc_eth_aurum_recal_predicted.pdf",width=16,height=12)
+  pdf(paste0(output_dir,"dc_eth_aurum_recal_predicted.pdf"),width=16,height=12)
   dc.eth
   dev.off()
 
+  dc.res[[1]]$eth = "White"
+  dc.res[[2]]$eth = "Asian"
+  dc.res[[3]]$eth = "Black"
+  dc.res[[4]]$eth = "Mixed or Other"
+  dc.res.pred <- dc.res %>% bind_rows(dc.res) %>% filter(!is.na(df.lab))
+  write.csv(dc.res.pred,file=paste0(output_dir,"dc_eth_aurum_recal_predicted.csv"))
+  
   #rename table outputs to compare obs vs pred
   dc.res.pred <- dc.res
 
 #### Observed discontinuation, by ethnicity and HbA1c benefit subgroup
 
-  final.dc <- final.dc %>% mutate(drugline=as.factor(drugline))
-  ddist <- datadist(final.dc); options(datadist='ddist') 
+  # final.dc <- final.dc %>% mutate(drugline=as.factor(drugline))
+  # ddist <- datadist(final.dc); options(datadist='ddist') 
+  # 
+  # #Model
+  # m.dis.obs <- lrm(stopdrug_6m_3mFU ~ drug*rcs(hba1c_diff,3)*ethnicity + drugline + ncurrtx, data=final.dc,x=T,y=T,se.fit=TRUE)
+  # m.dis.obs
+  # 
+  # #Predict probabilities on each drug de novo
+  # final.dc$drug <- "DPP4"
+  # final.dc$DPP4.dc <- plogis(predict(m.dis.obs, newdata=final.dc, se.fit=F))
+  # final.dc$drug <- "SGLT2"
+  # final.dc$SGLT2.dc <- plogis(predict(m.dis.obs, newdata=final.dc, se.fit=F))
+  # final.dc$drug <- final.dc$drugclass
+  # final.dc$sglt2.dpp4.dc.diff <- abs(final.dc$SGLT2.dc-final.dc$DPP4.dc)
+  # describe(final.dc$sglt2.dpp4.dc.diff)
+  # hist(final.dc$sglt2.dpp4.dc.diff)
+  # 
+  # #Plot mean and 95% interval of prediction by ethnicity and HbA1c defined subgroup
+  # 
+  # white <- final.dc %>% filter(ethnicity=="White") 
+  # asian <- final.dc %>% filter(ethnicity=="South Asian")
+  # black <- final.dc %>% filter(ethnicity=="Black") 
+  # mixed.other <- final.dc %>% filter(ethnicity=="Mixed"|ethnicity=="Other") 
+  # 
+  # L <- list(white,asian,black,mixed.other)
+  # 
+  # names(L) <- c("White",
+  #               "Asian",
+  #               "Black",
+  #               "Mixed or Other")
+  # 
+  # dc.res <- list()
+  # dc.plot <- list()
+  # 
+  # for(i in 1:4) 
+  # { 
+  #   #Subgroups by predicted treatment difference
+  #   data  <- L[[i]] %>% dplyr::filter(hba1c_diff<= -5) 
+  #   # df <- expand.grid(quantile(data$SGLT2.dc,c(0.5)),quantile(data$SGLT2.dc,c(0.25)),quantile(data$SGLT2.dc,c(0.75)),
+  #   #                   quantile(data$DPP4.dc,c(0.5)),quantile(data$DPP4.dc,c(0.25)),quantile(data$DPP4.dc,c(0.75)))
+  #   df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
+  #                     mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+  #   SGLT2.5 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
+  #   
+  #   data  <- L[[i]] %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
+  #   df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
+  #                     mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+  #   SGLT2.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
+  #   
+  #   data  <- L[[i]] %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
+  #   df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
+  #                     mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+  #   SGLT2.0 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
+  #   
+  #   data  <- L[[i]] %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
+  #   df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
+  #                     mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+  #   DPP4.0 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
+  #   
+  #   data  <- L[[i]] %>% dplyr::filter(hba1c_diff>= 3) 
+  #   df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
+  #                     mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+  #   DPP4.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
+  #   
+  #   final.dis <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
+  #   df.lab <- c("SGLT2.5","SGLT2.3","SGLT2.0","DPP4.0","DPP4.3")
+  #   final.dis6m <- cbind(df.lab,final.dis)
+  #   final.dis6m.p <- final.dis6m %>% 
+  #     add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+  #     add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+  #   
+  #   #res table
+  #   dc.res[[i]] <- final.dis6m.p
+  #   
+  #   #plot
+  #   coef = data.matrix(cbind(final.dis6m.p[,2]*100,final.dis6m.p[,5]*100))
+  #   cim = data.matrix(cbind(final.dis6m.p[,3]*100,final.dis6m.p[,6]*100))
+  #   cip = data.matrix(cbind(final.dis6m.p[,4]*100,final.dis6m.p[,7]*100))
+  #   dc.plot[[i]] <-
+  #     forestplot(row_names,
+  #              mean = coef,
+  #              lower= cim,
+  #              upper = cip,,
+  #              hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+  #              is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+  #              xticks = tick,
+  #              zero = 0,
+  #              #boxsize=0.1,
+  #              # graphwidth = unit(2,"inches"),
+  #              # lineheight = unit(0.7,"inches"),
+  #              ci.vertices=TRUE,
+  #              col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+  #              lty.ci = c(1,2),           ,
+  #              xlab="Early therapy discontinuation (%)",cex=1,
+  #              title = names(L[i]),
+  #              new_page = TRUE,
+  #              fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+  #              boxsize = .2, # We set the box size to better visualize the type
+  #              #line.margin = .1, # We need to add this to avoid crowding
+  #              txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+  #              #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+  #              #legend = c("SGLT2i","DPP4i"),
+  #              #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+  #              #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+  #              #xlog = TRUE
+  #   )
+  #   
+  # }  
+  #   
+  # #Plot together
+  # p.white <- grid2grob(print(dc.plot[[1]]))
+  # p.asian <- grid2grob(print(dc.plot[[2]]))
+  # p.black <- grid2grob(print(dc.plot[[3]]))
+  # p.mixed.other <- grid2grob(print(dc.plot[[4]]))
+  # 
+  # dc.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
+  # (wrap_elements(p.black) + wrap_elements(p.mixed.other))
+  # 
+  # dc.eth
+  # dc.res[1]
+  # dc.res[2]
+  # dc.res[3]
+  # dc.res[4]
   
-  #Model
-  m.dis.obs <- lrm(stopdrug_6m_3mFU ~ drug*rcs(hba1c_diff,3)*ethnicity + drugline + ncurrtx, data=final.dc,x=T,y=T,se.fit=TRUE)
-  m.dis.obs
+  #### Unadjusted
+  #Note this does not correct for potential imbalance amongst patients within each interval receiving each therapy
+  
+  # dc.res.unadjusted <- final.dc %>% 
+  #   dplyr::group_by(ethnicity,hba1c.breaks,drugclass) %>% 
+  #   dplyr::summarise(n=length(stopdrug_6m_3mFU),
+  #                    n.discontinued = sum(stopdrug_6m_3mFU),
+  #                    prop = sum(stopdrug_6m_3mFU) / length(stopdrug_6m_3mFU),
+  #                    lower = lapply(sum(stopdrug_6m_3mFU), prop.test, n = length(stopdrug_6m_3mFU)),
+  #                    upper = sapply(lower, function(x) x$conf.int[2]), 
+  #                    lower = sapply(lower, function(x) x$conf.int[1])) %>%
+  #   select(ethnicity,hba1c.breaks,drugclass,n,n.discontinued,prop,lower,upper)
+  
+  #Harrell method
+  dc.res.unadjusted <- final.dc %>% 
+    dplyr::group_by(ethnicity,hba1c.breaks,drugclass) %>% 
+    dplyr::summarise(n=length(stopdrug_6m_3mFU),
+                     n.discontinued = sum(stopdrug_6m_3mFU),
+                     #prop = sum(stopdrug_6m_3mFU) / length(stopdrug_6m_3mFU),
+                     prop.conf = binconf(x=sum(stopdrug_6m_3mFU), n = length(stopdrug_6m_3mFU)),
+                     prop=prop.conf[1],
+                     lci=prop.conf[2],
+                     uci=prop.conf[3]) %>%
+    select(ethnicity,hba1c.breaks,drugclass,n,n.discontinued,prop,lci,uci)
+  
+  #Long to wide for plotting
+  dc.res.unadjusted <- dc.res.unadjusted %>% pivot_wider(
+    names_from = drugclass,
+    values_from = c(n,n.discontinued,prop,lci,uci)
+  )
+  
+  #Plot observed and 95% CI by ethnicity and HbA1c defined subgroup
+  
+  white <- dc.res.unadjusted %>% filter(ethnicity=="White") 
+  asian <- dc.res.unadjusted %>% filter(ethnicity=="South Asian")
+  black <- dc.res.unadjusted %>% filter(ethnicity=="Black") 
+  mixed <- dc.res.unadjusted %>% filter(ethnicity=="mixed.other") 
+
+  L <- list(white,asian,black,mixed)
+  
+  names(L) <- c("White",
+                "Asian",
+                "Black",
+                "Mixed or Other")
+  
+  dc.plot <- list()
+  
+  tick <- c(0,5,10,15,20,25,30,35,40)
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
+  
+  for(i in 1:4) 
+  { 
+    #Subgroups by predicted treatment difference
+    plotdata <- L[[i]] %>% ungroup() %>% as.data.frame()  %>%
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+    
+    #plot
+    coef = data.matrix(cbind(plotdata[,8]*100,plotdata[,7]*100))
+    cim = data.matrix(cbind(plotdata[,10]*100,plotdata[,9]*100))
+    cip = data.matrix(cbind(plotdata[,12]*100,plotdata[,11]*100))
+    dc.plot[[i]] <-
+      forestplot(row_names,
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,
+                 hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Early therapy discontinuation (%)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .2, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend = c("SGLT2i","DPP4i"),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                 #xlog = TRUE
+      )
+    
+  }  
+  
+  
+  #Plot together
+  p.dc.white <- grid2grob(print(dc.plot[[1]]))
+  p.dc.asian <- grid2grob(print(dc.plot[[2]]))
+  p.dc.black <- grid2grob(print(dc.plot[[3]]))
+  p.dc.mixed.other <- grid2grob(print(dc.plot[[4]]))
+  
+  dc.eth.obs <- (wrap_elements(p.dc.white) + wrap_elements(p.dc.asian)) /
+    (wrap_elements(p.dc.black) + wrap_elements(p.dc.mixed.other))
+  
+  dc.eth.obs
+  
+  pdf.options(reset = TRUE, onefile = FALSE)
+  pdf(paste0(output_dir,"dc_eth_aurum_recal_observed_unadjusted.pdf"),width=16,height=12)
+  dc.eth.obs
+  dev.off()
+  
+  write.csv(dc.res.unadjusted,file=paste0(output_dir,"dc_eth_aurum_recal_observed_unadjusted.csv"))
+
+  #rename table outputs to compare obs vs pred
+  dc.res.obs <- dc.res.unadjusted
+  
+  #### Adjusted
+  
+  #Mean prediction
+  #m.dis.obs <- lrm(stopdrug_6m_3mFU ~ drug*rcs(hba1c_diff,3)*ethnicity + drugline + ncurrtx, data=final.dc,x=T,y=T,se.fit=TRUE)
+  #m.dis.obs <- lrm(stopdrug_6m_3mFU ~ drug*ethnicity + drugline + ncurrtx, data=final.dc,x=T,y=T,se.fit=TRUE)
+  # m.dis.obs <- lrm(stopdrug_6m_3mFU ~ drug*ethnicity + drugline + ncurrtx + 
+  #                    drug*agetx+
+  #                    drug*prebmi+
+  #                    drug*prehba1cmmol+
+  #                    drug*prealtlog+
+  #                    drug*egfr_ckdepi, data=final.dc,x=T,y=T,se.fit=TRUE)
+  # m.dis.obs
+  m.dis.obs <- lrm(stopdrug_6m_3mFU ~ drug*ethnicity*hba1c.breaks + drugline + ncurrtx, data=final.dc,x=T,y=T,se.fit=TRUE)
+  
+  #The above models show the predicted HbA1c difference or covariate * drug interactions are required as an input variable to stratify discontinuation
   
   #Predict probabilities on each drug de novo
   final.dc$drug <- "DPP4"
@@ -2081,12 +2351,266 @@ c.benefit + 1.96*c.benefit.se
   describe(final.dc$sglt2.dpp4.dc.diff)
   hist(final.dc$sglt2.dpp4.dc.diff)
   
+  dc.res.overall <- final.dc %>% 
+    group_by(ethnicity,hba1c.breaks) %>% 
+    dplyr::summarise(
+      DPP4.dc = mean(DPP4.dc),
+      SGLT2.dc = mean(SGLT2.dc),
+      sglt2.dpp4.dc.diff = mean(sglt2.dpp4.dc.diff)
+    )
+  
+
+  B <- 1000
+  n=nrow(final.dc)
+  
+  dc.res <- list()
+  
+  for(b in 1:B){
+    i = sample(x = 1:n, size = n, replace = TRUE) ## sample indices
+    temp = final.dc[i,] ## temp data set
+    #temp_model =  lrm(stopdrug_6m_3mFU ~ drug*rcs(hba1c_diff,3)*ethnicity + drugline + ncurrtx, data=temp,x=T,y=T,se.fit=TRUE)
+    temp_model =  lrm(stopdrug_6m_3mFU ~ drug*hba1c.breaks*ethnicity + drugline + ncurrtx, data=temp,x=T,y=T,se.fit=TRUE)
+    
+    temp$drug <- "DPP4"
+    temp$DPP4.dc <- plogis(predict(temp_model, newdata=temp, se.fit=F))
+    temp$drug <- "SGLT2"
+    temp$SGLT2.dc <- plogis(predict(temp_model, newdata=temp, se.fit=F))
+    temp$sglt2.dpp4.dc.diff <- abs(temp$SGLT2.dc-temp$DPP4.dc)
+    
+    res <- temp %>% 
+      group_by(ethnicity,hba1c.breaks) %>% 
+      dplyr::summarise(
+        DPP4.dc = mean(DPP4.dc),
+        SGLT2.dc = mean(SGLT2.dc),
+        sglt2.dpp4.dc.diff = mean(sglt2.dpp4.dc.diff)
+      )
+    
+    #res table
+    dc.res[[b]] <- res
+  }
+  
+  #Derive the bootstrapped CIs for the mean predictions for each subgrup
+  
+  dc.res.ci <- bind_rows(dc.res, .id = "bs_run") %>% 
+    group_by(ethnicity,hba1c.breaks) %>% 
+    dplyr::summarise(
+      #DPP4.dc = mean(DPP4.dc),
+      DPP4.dc.lci = quantile(DPP4.dc,probs=0.025),
+      DPP4.dc.uci = quantile(DPP4.dc,probs=0.975),
+      #SGLT2.dc = mean(SGLT2.dc),
+      SGLT2.dc.lci = quantile(SGLT2.dc,probs=0.025),
+      SGLT2.dc.uci = quantile(SGLT2.dc,probs=0.975),
+      #sglt2.dpp4.dc.diff = mean(sglt2.dpp4.dc.diff),
+      sglt2.dpp4.dc.diff.lci = quantile(sglt2.dpp4.dc.diff,probs=0.025),
+      sglt2.dpp4.dc.diff.uci = quantile(sglt2.dpp4.dc.diff,probs=0.975),
+    )
+  
+  
+  dc.res.adjusted <- left_join(dc.res.overall,dc.res.ci,by=c("ethnicity","hba1c.breaks"))
+  tail(dc.res.adjusted)
+  
   #Plot mean and 95% interval of prediction by ethnicity and HbA1c defined subgroup
   
-  white <- final.dc %>% filter(ethnicity=="White") 
-  asian <- final.dc %>% filter(ethnicity=="South Asian")
-  black <- final.dc %>% filter(ethnicity=="Black") 
-  mixed.other <- final.dc %>% filter(ethnicity=="Mixed"|ethnicity=="Other") 
+  white <- dc.res.adjusted %>% filter(ethnicity=="White") 
+  asian <- dc.res.adjusted %>% filter(ethnicity=="South Asian")
+  black <- dc.res.adjusted %>% filter(ethnicity=="Black") 
+  mixed <- dc.res.adjusted %>% filter(ethnicity=="mixed.other") 
+  #mixed <- dc.res.adjusted %>% filter(ethnicity=="Mixed") 
+  #other <- dc.res.adjusted %>% filter(ethnicity=="Other") 
+  
+  L <- list(white,asian,black,mixed)
+  
+  names(L) <- c("White",
+                "Asian",
+                "Black",
+                "Mixed or Other")
+  
+  # L <- list(white,asian,black,mixed,other)
+  # 
+  # names(L) <- c("White",
+  #               "Asian",
+  #               "Black",
+  #               "Mixed",
+  #               "Other")
+  
+  dc.plot <- list()
+  
+  tick <- c(0,5,10,15,20,25,30,35,40)
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
+  
+  for(i in 1:4) 
+  { 
+    #Subgroups by predicted treatment difference
+    plotdata <- L[[i]] %>% ungroup() %>% as.data.frame()  %>%
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+    
+    #plot
+    coef = data.matrix(cbind(plotdata[,4]*100,plotdata[,3]*100))
+    cim = data.matrix(cbind(plotdata[,8]*100,plotdata[,6]*100))
+    cip = data.matrix(cbind(plotdata[,9]*100,plotdata[,7]*100))
+    dc.plot[[i]] <-
+      forestplot(row_names,
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,
+                 hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Early therapy discontinuation (%)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .2, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend = c("SGLT2i","DPP4i"),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                 #xlog = TRUE
+      )
+    
+  }  
+  
+  
+  #Plot together
+  p.dc.white <- grid2grob(print(dc.plot[[1]]))
+  p.dc.asian <- grid2grob(print(dc.plot[[2]]))
+  p.dc.black <- grid2grob(print(dc.plot[[3]]))
+  p.dc.mixed.other <- grid2grob(print(dc.plot[[4]]))
+  
+  dc.eth.obs.adj <- (wrap_elements(p.dc.white) + wrap_elements(p.dc.asian)) /
+    (wrap_elements(p.dc.black) + wrap_elements(p.dc.mixed.other))
+  
+  dc.eth.obs.adj
+  
+  pdf.options(reset = TRUE, onefile = FALSE)
+  pdf(paste0(output_dir,"dc_eth_aurum_recal_observed_adjusted.pdf"),width=16,height=12)
+  dc.eth.obs.adj
+  dev.off()
+
+  write.csv(dc.res.adjusted,file=paste0(output_dir,"dc_eth_aurum_recal_observed_adjusted.csv"))
+  
+ ####Explore obs vs pred difference
+  # dc.res.white.obs <- dc.res.obs %>% 
+  #   filter(ethnicity=="South Asian") %>% 
+  #   mutate(obs=prop_DPP4-prop_SGLT2) %>%
+  #   select(ethnicity,hba1c.breaks,obs)
+  # #Add CIs for contrast
+  # 
+  # # dc.res.white.obs <- data.frame(Ethnicity="Asian",
+  # #                            model="obs",
+  # #                            dc.res.obs[4]) %>%
+  # #   mutate(obs=DPP4.est-SGLT2.est,
+  # #          obs.l = DPP4.lci-SGLT2.lci,
+  # #          obs.u = DPP4.uci-SGLT2.uci) %>% 
+  # #   select(Ethnicity,df.lab,model,obs,obs.l,obs.u) %>%
+  # #   filter(!is.na(obs))
+  # 
+  # dc.res.white.pred <- data.frame(dc.res.pred[4]) %>% 
+  #   mutate(pred=DPP4.est-SGLT2.est) %>% 
+  #   select(pred) %>%
+  #   filter(!is.na(pred))
+  # 
+  # dc.res.white <- cbind(dc.res.white.obs,dc.res.white.pred) 
+  # 
+  # ggplot(dc.res.white,aes(x=pred*100,y=obs*100)) +
+  #   geom_vline(xintercept=0, linetype="dashed", color = "grey60") + 
+  #   geom_hline(yintercept=0, linetype="dashed", color = "grey60") +
+  #   geom_abline(intercept=0,slope=1, color="red", lwd=0.75) + ggtitle("") +
+  #   geom_point(alpha=1) + theme_classic()  +
+  #   #geom_errorbar(aes(ymin=obs.l, ymax=obs.u), colour="black", width=.1)  +
+  #   ylab("Observed discontinuation)") + xlab("Predicted discontinuation") +
+  #   theme_base(base_size = 8)  +
+  #   scale_x_continuous(limits=c(-25,5)) +
+  #   scale_y_continuous(limits=c(-25,5)) +
+  #   theme(plot.background = element_blank()) + theme(axis.text.x=element_text(size=8),axis.text.y=element_text(size=8)) +
+  #   theme(text = element_text(size = 10),
+  #         # axis.ticks.x = element_blank(),
+  #         # axis.ticks.y = element_blank(),
+  #         axis.ticks.x = element_line(colour =  "grey50"),
+  #         axis.ticks.y = element_line(colour =  "grey50"),
+  #         axis.line = element_line(colour =  "grey50" ),
+  #         panel.grid.major = element_blank(),
+  #         panel.grid.minor = element_blank(),
+  #         panel.border = element_blank(),
+  #         panel.background = element_blank())
+
+#### Weight #####
+
+  #Set up 
+  
+  #Set dummy hba1cmonth at 6 months
+  final.wt <- final.wt %>% dplyr::mutate(hba1cmonth=6)
+  
+  #Predict HbA1c outcome uncalibrated
+  final.wt <- final.wt %>% mutate(drug=drugclass,
+                                  drugclass="DPP4")
+  final.wt$DPP4.pred.lm.uncal <- predict(m1,final.wt)
+  final.wt <- final.wt %>% mutate(drugclass="SGLT2")
+  final.wt$SGLT2.pred.lm.uncal <- predict(m1,final.wt)
+  final.wt <- final.wt %>% 
+    mutate(hba1c_diff.uncal = SGLT2.pred.lm.uncal-DPP4.pred.lm.uncal,
+           bestdrug.uncal=ifelse(hba1c_diff.uncal<=0,"SGLT2","DPP4"),
+           drugclass=drug)
+
+  #Recalibrate HbA1c outcome to AURUM
+  final.wt <- final.wt %>% mutate(DPP4.pred.lm.recal=ifelse(ethnicity == "White",DPP4.pred.lm.uncal+ctfm$intercept[1],
+                                                            ifelse(ethnicity == "South Asian",DPP4.pred.lm.uncal+ctfm$intercept[3],
+                                                                   ifelse(ethnicity == "Black",DPP4.pred.lm.uncal+ctfm$intercept[5],
+                                                                          ifelse(ethnicity == "Mixed"|ethnicity=="Other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
+                                                                          )))),
+                                  SGLT2.pred.lm.recal=ifelse(ethnicity == "White",SGLT2.pred.lm.uncal+ctfm$intercept[2],SGLT2.pred.lm.uncal),
+                                  hba1c_diff.recal = SGLT2.pred.lm.recal-DPP4.pred.lm.recal,
+                                  bestdrug.recal=ifelse(hba1c_diff.recal<=0,"SGLT2","DPP4"))
+  
+#Generate other variables for modelling
+  
+  #Set drugline as factor
+  final.wt <- final.wt %>% mutate(drugline=as.factor(drugline))
+  
+  #Collapse ethnicity
+  final.wt <- final.wt %>% mutate(ethnicity.backup = ethnicity,
+                                  ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
+  describe(final.wt$ethnicity)
+  
+  #Define hba1c.breaks based on recalibrated HbA1c outcome
+  final.wt <- final.wt %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal)-0.01,-5,-3,0,3,max(hba1c_diff.recal)+0.01)))
+  describe(final.wt$hba1c.breaks)
+  
+  #Set HbA1c diff to recalibrated HbA1c outcome
+  final.wt <- final.wt %>% dplyr::rename(hba1c_diff="hba1c_diff.recal",
+                                         bestdrug="bestdrug.recal")
+  
+  #Define datadist for modelling
+  ddist <- datadist(final.wt); options(datadist='ddist') 
+  
+#### Predicted weight change from GOLD model (after HbA1c recalibration)  
+
+#Predict weight change on each drug using GOLD model
+  final.wt$drug <- "DPP4"
+  final.wt$predwtonDPP4 <- predict(m.wt, newdata=final.wt, se.fit=F)
+  final.wt$drug <- "SGLT2"
+  final.wt$predwtonSGLT2 <- predict(m.wt, newdata=final.wt, se.fit=F)
+  final.wt$drug <- final.wt$drugclass
+  final.wt$predwtdiffsglt2dpp4 <- abs(final.wt$predwtonSGLT2-final.wt$predwtonDPP4)
+  describe(final.wt$predwtdiffsglt2dpp4)
+  hist(final.wt$predwtdiffsglt2dpp4)
+  
+#Plot mean and 95% interval of prediction by ethnicity and HbA1c defined subgroup
+  white <- final.wt %>% filter(ethnicity=="White")
+  asian <- final.wt %>% filter(ethnicity=="South Asian")
+  black <- final.wt %>% filter(ethnicity=="Black")
+  mixed.other <- final.wt %>% filter(ethnicity=="mixed.other")
   
   L <- list(white,asian,black,mixed.other)
   
@@ -2095,201 +2619,403 @@ c.benefit + 1.96*c.benefit.se
                 "Black",
                 "Mixed or Other")
   
-  dc.res <- list()
-  dc.plot <- list()
+  wt.res <- list()
+  wt.plot <- list()
   
   for(i in 1:4) 
   { 
     #Subgroups by predicted treatment difference
     data  <- L[[i]] %>% dplyr::filter(hba1c_diff<= -5) 
-    # df <- expand.grid(quantile(data$SGLT2.dc,c(0.5)),quantile(data$SGLT2.dc,c(0.25)),quantile(data$SGLT2.dc,c(0.75)),
-    #                   quantile(data$DPP4.dc,c(0.5)),quantile(data$DPP4.dc,c(0.25)),quantile(data$DPP4.dc,c(0.75)))
-    df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
-                      mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+    df <- expand.grid(mean(data$predwtonSGLT2),quantile(data$predwtonSGLT2,c(0.025)),quantile(data$predwtonSGLT2,c(0.975)),
+                      mean(data$predwtonDPP4),quantile(data$predwtonDPP4,c(0.025)),quantile(data$predwtonDPP4,c(0.975)))
     SGLT2.5 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
     data  <- L[[i]] %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
-    df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
-                      mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+    df <- expand.grid(mean(data$predwtonSGLT2),quantile(data$predwtonSGLT2,c(0.025)),quantile(data$predwtonSGLT2,c(0.975)),
+                      mean(data$predwtonDPP4),quantile(data$predwtonDPP4,c(0.025)),quantile(data$predwtonDPP4,c(0.975)))
     SGLT2.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
     data  <- L[[i]] %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
-    df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
-                      mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+    df <- expand.grid(mean(data$predwtonSGLT2),quantile(data$predwtonSGLT2,c(0.025)),quantile(data$predwtonSGLT2,c(0.975)),
+                      mean(data$predwtonDPP4),quantile(data$predwtonDPP4,c(0.025)),quantile(data$predwtonDPP4,c(0.975)))
     SGLT2.0 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
     data  <- L[[i]] %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
-    df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
-                      mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+    df <- expand.grid(mean(data$predwtonSGLT2),quantile(data$predwtonSGLT2,c(0.025)),quantile(data$predwtonSGLT2,c(0.975)),
+                      mean(data$predwtonDPP4),quantile(data$predwtonDPP4,c(0.025)),quantile(data$predwtonDPP4,c(0.975)))
     DPP4.0 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
     data  <- L[[i]] %>% dplyr::filter(hba1c_diff>= 3) 
-    df <- expand.grid(mean(data$SGLT2.dc),quantile(data$SGLT2.dc,c(0.025)),quantile(data$SGLT2.dc,c(0.975)),
-                      mean(data$DPP4.dc),quantile(data$DPP4.dc,c(0.025)),quantile(data$DPP4.dc,c(0.975)))
+    df <- expand.grid(mean(data$predwtonSGLT2),quantile(data$predwtonSGLT2,c(0.025)),quantile(data$predwtonSGLT2,c(0.975)),
+                      mean(data$predwtonDPP4),quantile(data$predwtonDPP4,c(0.025)),quantile(data$predwtonDPP4,c(0.975)))
     DPP4.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
-    final.dis <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
+    final.wt <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
     df.lab <- c("SGLT2.5","SGLT2.3","SGLT2.0","DPP4.0","DPP4.3")
-    final.dis6m <- cbind(df.lab,final.dis)
-    final.dis6m.p <- final.dis6m %>% 
+    final.wt <- cbind(df.lab,final.wt)
+    final.wt.p <- final.wt6m %>% 
       add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
       add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
     
     #res table
-    dc.res[[i]] <- final.dis6m.p
+    wt.res[[i]] <- final.wt.p
     
     #plot
-    coef = data.matrix(cbind(final.dis6m.p[,2]*100,final.dis6m.p[,5]*100))
-    cim = data.matrix(cbind(final.dis6m.p[,3]*100,final.dis6m.p[,6]*100))
-    cip = data.matrix(cbind(final.dis6m.p[,4]*100,final.dis6m.p[,7]*100))
-    dc.plot[[i]] <-
+    tick <- c(0,5,10,15,20,25,30,35,40)
+    row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                          "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
+    coef = data.matrix(cbind(final.wt.p[,2],final.wt.p[,5]))
+    cim = data.matrix(cbind(final.wt.p[,3],final.wt.p[,6]))
+    cip = data.matrix(cbind(final.wt.p[,4],final.wt.p[,7]))
+    wt.plot[[i]] <-
       forestplot(row_names,
-               mean = coef,
-               lower= cim,
-               upper = cip,,
-               hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
-               is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-               xticks = tick,
-               zero = 0,
-               #boxsize=0.1,
-               # graphwidth = unit(2,"inches"),
-               # lineheight = unit(0.7,"inches"),
-               ci.vertices=TRUE,
-               col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
-               lty.ci = c(1,2),           ,
-               xlab="Early therapy discontinuation (%)",cex=1,
-               title = names(L[i]),
-               new_page = TRUE,
-               fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
-               boxsize = .2, # We set the box size to better visualize the type
-               #line.margin = .1, # We need to add this to avoid crowding
-               txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
-               #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
-               #legend = c("SGLT2i","DPP4i"),
-               #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
-               #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
-               #xlog = TRUE
-    )
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,,
+                 hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Weight change (kg)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .2, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend = c("SGLT2i","DPP4i"),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                 #xlog = TRUE
+      )
     
   }  
-    
-  #Plot together
+  
+#Plot together
   p.white <- grid2grob(print(dc.plot[[1]]))
   p.asian <- grid2grob(print(dc.plot[[2]]))
   p.black <- grid2grob(print(dc.plot[[3]]))
   p.mixed.other <- grid2grob(print(dc.plot[[4]]))
   
-  dc.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
-  (wrap_elements(p.black) + wrap_elements(p.mixed.other))
+  wt.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
+    (wrap_elements(p.black) + wrap_elements(p.mixed.other))
   
-  dc.eth
-  dc.res[1]
-  dc.res[2]
-  dc.res[3]
-  dc.res[4]
+  wt.eth
   
   pdf.options(reset = TRUE, onefile = FALSE)
-  pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/dc_eth_aurum_recal_observed.pdf",width=16,height=12)
-  dc.eth
+  pdf(paste0(output_dir,"wt_eth_aurum_recal_predicted.pdf"),width=16,height=12)
+  wt.eth
   dev.off()
-
   
-  dc.res.obs <- dc.res
-
-  dc.res.pred[4]
-  dc.res.obs[4]
+  wt.res[[1]]$eth = "White"
+  wt.res[[2]]$eth = "Asian"
+  wt.res[[3]]$eth = "Black"
+  wt.res[[4]]$eth = "Mixed or Other"
+  wt.res.pred <- wt.res %>% bind_rows(wt.res) %>% filter(!is.na(df.lab))
+  write.csv(wt.res.pred,file=paste0(output_dir,"wtc_eth_aurum_recal_predicted.csv"))  
   
-#Plot obs vs pred difference
-  dc.res.white.obs <- data.frame(Ethnicity="Asian",
-                             model="obs",
-                             dc.res.obs[4]) %>%
-    mutate(obs=DPP4.est-SGLT2.est,
-           obs.l = DPP4.lci-SGLT2.lci,
-           obs.u = DPP4.uci-SGLT2.uci) %>% 
-    select(Ethnicity,df.lab,model,obs,obs.l,obs.u) %>%
-    filter(!is.na(obs))
+#### Observed weight, by ethnicity and HbA1c benefit subgroup
+  
+  #Harrell method
+  wt.res.unadjusted <- final.wt %>% 
+    dplyr::group_by(ethnicity,hba1c.breaks,drugclass) %>% 
+    dplyr::summarise(n=length(wtchange),
+                     wt.change = mean(wtchange),
+                     lci = mean(wtchange) - (1.96*(sd(wtchange)/sqrt(length(wtchange)))),
+                     uci = mean(wtchange) + (1.96*(sd(wtchange)/sqrt(length(wtchange))))) %>%
+    select(ethnicity,hba1c.breaks,drugclass,n,wt.change,lci,uci)
+  
+  #Long to wide for plotting
+  wt.res.unadjusted <- wt.res.unadjusted %>% pivot_wider(
+    names_from = drugclass,
+    values_from = c(n,wt.change,lci,uci)
+  )
+  
+  #Plot observed and 95% CI by ethnicity and HbA1c defined subgroup
+  
+  white <- wt.res.unadjusted %>% filter(ethnicity=="White") 
+  asian <- wt.res.unadjusted %>% filter(ethnicity=="South Asian")
+  black <- wt.res.unadjusted %>% filter(ethnicity=="Black") 
+  mixed <- wt.res.unadjusted %>% filter(ethnicity=="mixed.other") 
+  
+  L <- list(white,asian,black,mixed)
+  
+  names(L) <- c("White",
+                "Asian",
+                "Black",
+                "Mixed or Other")
+  
+  wt.plot <- list()
+  
+  tick <- c(-4,-3,-2,-1,0)
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
+  
+  for(i in 1:4) 
+  { 
+    #Subgroups by predicted treatment difference
+    plotdata <- L[[i]] %>% ungroup() %>% as.data.frame()  %>%
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+    
+    #plot
+    coef = data.matrix(cbind(plotdata[,6],plotdata[,5]))
+    cim = data.matrix(cbind(plotdata[,8],plotdata[,7]))
+    cip = data.matrix(cbind(plotdata[,10],plotdata[,9]))
+    wt.plot[[i]] <-
+      forestplot(row_names,
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,
+                 hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Weight change (kg)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .2, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend = c("SGLT2i","DPP4i"),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                 #xlog = TRUE
+      )
+    
+  }  
   
   
-  dc.res.white.pred <- data.frame(dc.res.pred[4]) %>% 
-    mutate(pred=DPP4.est-SGLT2.est) %>% 
-    select(pred) %>%
-    filter(!is.na(pred))
+  #Plot together
+  p.wt.white <- grid2grob(print(wt.plot[[1]]))
+  p.wt.asian <- grid2grob(print(wt.plot[[2]]))
+  p.wt.black <- grid2grob(print(wt.plot[[3]]))
+  p.wt.mixed.other <- grid2grob(print(wt.plot[[4]]))
   
-  dc.res.white <- cbind(dc.res.white.obs,dc.res.white.pred) 
+  wt.eth.obs <- (wrap_elements(p.wt.white) + wrap_elements(p.wt.asian)) /
+    (wrap_elements(p.wt.black) + wrap_elements(p.wt.mixed.other))
   
-  ggplot(dc.res.white,aes(x=pred,y=obs)) +
-    geom_vline(xintercept=0, linetype="dashed", color = "grey60") + 
-    geom_hline(yintercept=0, linetype="dashed", color = "grey60") +
-    geom_abline(intercept=0,slope=1, color="red", lwd=0.75) + ggtitle("") +
-    geom_point(alpha=1) + theme_classic()  +
-    geom_errorbar(aes(ymin=obs.l, ymax=obs.u), colour="black", width=.1)  +
-    ylab("Decile average achieved HbA1c (mmol/mol)") + xlab("Predicted HbA1c (mmol/mol)") +
-    theme_base(base_size = 8)  +
-    theme(plot.background = element_blank()) + theme(axis.text.x=element_text(size=8),axis.text.y=element_text(size=8)) +
-    theme(text = element_text(size = 10),
-          # axis.ticks.x = element_blank(),
-          # axis.ticks.y = element_blank(),
-          axis.ticks.x = element_line(colour =  "grey50"),
-          axis.ticks.y = element_line(colour =  "grey50"),
-          axis.line = element_line(colour =  "grey50" ),
-          panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank(),
-          panel.border = element_blank(),
-          panel.background = element_blank())
-
-
-# 
-# 
-# #Overall
-# data <- final.dc
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# overall <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6)
-# 
-# #sglt2.best
-# data <- final.dc %>% dplyr::filter(bestdrug=="SGLT2")
-# describe(data$preddisonSGLT2)
-# describe(data$preddisonDPP4)
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# SGLT2.best <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6)
-# 
-# #dpp4.best
-# data <- final.dc %>% dplyr::filter(bestdrug=="DPP4")
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# DPP4.best <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6)
-# 
-# #Subgroups by predicted treatment difference
-# data  <- final.dc %>% dplyr::filter(hba1c_diff<= -5) 
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# SGLT2.5 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
-# 
-# data  <- final.dc %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# SGLT2.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
-# 
-# data  <- final.dc %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# SGLT2.0 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
-# 
-# data  <- final.dc %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# DPP4.0 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
-# 
-# data  <- final.dc %>% dplyr::filter(hba1c_diff>= 3) 
-# df <- expand.grid(quantile(data$preddisonSGLT2,c(0.5)),quantile(data$preddisonSGLT2,c(0.25)),quantile(data$preddisonSGLT2,c(0.75)),
-#                   quantile(data$preddisonDPP4,c(0.5)),quantile(data$preddisonDPP4,c(0.25)),quantile(data$preddisonDPP4,c(0.75)))
-# DPP4.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
-# 
-# final.dis <- rbind(overall,SGLT2.best,SGLT2.5,SGLT2.3,SGLT2.0,DPP4.best,DPP4.0,DPP4.3)
-# df.lab <- c("overall","SGLT2.best","SGLT2.5","SGLT2.3","SGLT2.0","DPP4.best","DPP4.0","DPP4.3")
-# final.dis6m <- cbind(df.lab,final.dis)
-# final.dis6m
-# final.dis6m.p <- data.frame(final.dis6m[c(-1,-2,-6),])
-# final.dis6m.p <- final.dis6m.p %>% add_row(SGLT2.est=NA, .before=1) %>% add_row(SGLT2.est=NA, .before=5)
-# final.dis6m.p
+  wt.eth.obs
+  
+  pdf.options(reset = TRUE, onefile = FALSE)
+  pdf(paste0(output_dir,"wt_eth_aurum_recal_observed_unadjusted.pdf"),width=16,height=12)
+  wt.eth.obs
+  dev.off()
+  
+  write.csv(wt.res.unadjusted,file=paste0(output_dir,"wt_eth_aurum_recal_observed_unadjusted.csv"))
+  
+  #rename table outputs to compare obs vs pred
+  wt.res.obs <- wt.res.unadjusted
+  
+#### Adjusted
+  
+  #overall
+  summary(lm(wtchange~drug+preweight,data=final.wt))
+  
+  #Mean prediction
+  #m.wt.obs <- ols(wtchange~drug*rcs(hba1c_diff,3)*ethnicity + preweight + drugline + ncurrtx,data=final.wt,x=T,y=T)
+  m.wt.obs <- ols(wtchange~drug*hba1c.breaks*ethnicity + preweight + drugline + ncurrtx,data=final.wt,x=T,y=T)
+  
+  #Predict weight on each drug de novo
+  final.wt$drug <- "DPP4"
+  final.wt$DPP4.wt <- predict(m.wt.obs, newdata=final.wt, se.fit=F)
+  final.wt$drug <- "SGLT2"
+  final.wt$SGLT2.wt <- predict(m.wt.obs, newdata=final.wt, se.fit=F)
+  final.wt$sglt2.dpp4.wt.diff <- final.wt$SGLT2.wt-final.wt$DPP4.wt
+  describe(final.wt$sglt2.dpp4.wt.diff)
+  hist(final.wt$sglt2.dpp4.wt.diff)
+  final.wt$drug <- final.wt$drugclass
+  
+  wt.res.overall <- final.wt %>% 
+    group_by(ethnicity,hba1c.breaks) %>% 
+    dplyr::summarise(
+      DPP4.wt = mean(DPP4.wt),
+      SGLT2.wt = mean(SGLT2.wt),
+      sglt2.dpp4.wt.diff = mean(sglt2.dpp4.wt.diff)
+    )
+  
+  #Bootstrap predicted means
+  B <- 1000
+  n=nrow(final.wt)
+  
+  wt.res <- list()
+  
+  for(b in 1:B){
+    i = sample(x = 1:n, size = n, replace = TRUE) ## sample indices
+    temp = final.wt[i,] ## temp data set
+    temp_model =   ols(wtchange~drug*hba1c.breaks*ethnicity + preweight + drugline + ncurrtx,data=final.wt,x=T,y=T)
+    temp$drug <- "DPP4"
+    temp$DPP4.wt <-  predict(temp_model, newdata=temp, se.fit=F)
+    temp$drug <- "SGLT2"
+    temp$SGLT2.wt <- predict(temp_model, newdata=temp, se.fit=F)
+    temp$sglt2.dpp4.wt.diff <- temp$SGLT2.wt-temp$DPP4.wt
+    
+    res <- temp %>% 
+      group_by(ethnicity,hba1c.breaks) %>% 
+      dplyr::summarise(
+        DPP4.wt = mean(DPP4.wt),
+        SGLT2.wt = mean(SGLT2.wt),
+        sglt2.dpp4.wt.diff = mean(sglt2.dpp4.wt.diff)
+      )
+    
+    #res table
+    wt.res[[b]] <- res
+  }
+  
+  #Derive the bootstrapped CIs for the mean predictions for each subgrup
+  wt.res.ci <- bind_rows(wt.res, .id = "bs_run") %>% 
+    group_by(ethnicity,hba1c.breaks) %>% 
+    dplyr::summarise(
+      #DPP4.wt = mean(DPP4.wt),
+      DPP4.wt.lci = quantile(DPP4.wt,probs=0.025),
+      DPP4.wt.uci = quantile(DPP4.wt,probs=0.975),
+      #SGLT2.wt = mean(SGLT2.wt),
+      SGLT2.wt.lci = quantile(SGLT2.wt,probs=0.025),
+      SGLT2.wt.uci = quantile(SGLT2.wt,probs=0.975),
+      #sglt2.dpp4.wt.diff = mean(sglt2.dpp4.wt.diff),
+      sglt2.dpp4.wt.diff.lci = quantile(sglt2.dpp4.wt.diff,probs=0.025),
+      sglt2.dpp4.wt.diff.uci = quantile(sglt2.dpp4.wt.diff,probs=0.975),
+    )
+  
+  
+  wt.res.adjusted <- left_join(wt.res.overall,wt.res.ci,by=c("ethnicity","hba1c.breaks"))
+  tail(wt.res.adjusted)
+  
+  #Plot mean and 95% interval of prediction by ethnicity and HbA1c defined subgroup
+  white <- wt.res.adjusted %>% filter(ethnicity=="White") 
+  asian <- wt.res.adjusted %>% filter(ethnicity=="South Asian")
+  black <- wt.res.adjusted %>% filter(ethnicity=="Black") 
+  mixed <- wt.res.adjusted %>% filter(ethnicity=="mixed.other") 
+  #mixed <- wt.res.adjusted %>% filter(ethnicity=="Mixed") 
+  #other <- wt.res.adjusted %>% filter(ethnicity=="Other") 
+  
+  L <- list(white,asian,black,mixed)
+  
+  names(L) <- c("White",
+                "Asian",
+                "Black",
+                "Mixed or Other")
+  
+  # L <- list(white,asian,black,mixed,other)
+  # 
+  # names(L) <- c("White",
+  #               "Asian",
+  #               "Black",
+  #               "Mixed",
+  #               "Other")
+  
+  wt.plot <- list()
+  
+  tick <- c(-4,-3,-2,-1,0)
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))
+  
+  for(i in 1:4) 
+  { 
+    #Subgroups by predicted treatment difference
+    plotdata <- L[[i]] %>% ungroup() %>% as.data.frame()  %>%
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+    
+    #plot
+    coef = data.matrix(cbind(plotdata[,4],plotdata[,3]))
+    cim = data.matrix(cbind(plotdata[,8],plotdata[,6]))
+    cip = data.matrix(cbind(plotdata[,9],plotdata[,7]))
+    wt.plot[[i]] <-
+      forestplot(row_names,
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,
+                 #legend = c("SGLT2i","DPP4i"),
+                 hrzl_lines = gpar(col="#444444"),#,lineheight=unit(2,'cm'))
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Weight change (kg)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .1, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                #xlog = TRUE
+     #xlog = TRUE
+      )
+    
+  }  
+  
+  #Add dummy legend
+  dummy <- final.hb %>% 
+    sample_n(1000) %>% 
+    mutate(drugclass = ifelse(drugclass=="SGLT2","SGLT2 inhibitor","DPP-4 inhibitor")) %>%
+    ggplot(aes(x = prehba1cmmol, y = prebmi, group=drugclass)) + 
+    scale_color_manual(values=c("#4118de","#f1a340")) +
+    geom_point(aes(colour=drugclass), size = 1.5) + theme_bw() +
+    theme(legend.text = element_text(colour="black", size=rel(1))) + 
+    theme(legend.title=element_blank())  + 
+    theme(legend.direction = "horizontal", 
+          legend.position = "bottom",
+          legend.box = "horizontal"
+    ) +
+    guides(colour = guide_legend(override.aes = list(size=4)))
+  
+  # Create user-defined function, which extracts legends from ggplots #https://statisticsglobe.com/add-common-legend-to-combined-ggplot2-plots-in-r/
+  extract_legend <- function(my_ggp) {
+    step1 <- ggplot_gtable(ggplot_build(my_ggp))
+    step2 <- which(sapply(step1$grobs, function(x) x$name) == "guide-box")
+    step3 <- step1$grobs[[step2]]
+    return(step3)
+  }
+  # Apply user-defined function to extract legend
+  shared_legend <- extract_legend(dummy)
+  
+  #Plot together
+  p.white <- grid2grob(print(wt.plot[[1]]))
+  p.asian <- grid2grob(print(wt.plot[[2]]))
+  p.black <- grid2grob(print(wt.plot[[3]]))
+  p.mixed.other <- grid2grob(print(wt.plot[[4]]))
+  
+  wt.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
+    (wrap_elements(p.black) + wrap_elements(p.mixed.other)) /
+    shared_legend +
+    plot_layout(height=c(10,10,1))
+  
+  wt.eth
+  
+  #Save
+  grDevices::cairo_pdf(paste0(output_dir,"wt_eth_aurum_recal_observed_adjusted.pdf"),width=14,height=10)
+  wt.eth
+  dev.off()
+  
+  png(paste0(output_dir,"wt_eth_aurum_recal_observed_adjusted.png"),width=3200,height=2400,res=200,restoreConsole=TRUE)
+  wt.eth
+  dev.off()
+  
+  write.csv(wt.res.adjusted,file=paste0(output_dir,"wt_eth_aurum_recal_observed_adjusted.csv"))
+  
+  wt.res.obs <- wt.res.adjusted
+  
