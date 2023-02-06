@@ -13,10 +13,11 @@ library(scales)
 library(forcats)
 
 output_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2023_SGLT2DPP4Aurum/results/" 
+data_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/CPRD/mastermind22/"
 
 #### Data prep (run once only) ####
 
-#Adapt from Pedros code (see Projects\2019_SGLT2vsDPP4\scripts\aurum_validation\set_data_aurum_validation.R)
+#Adapt from Pedros code (see Projects\2019_SGLT2vsDPP4\scripts\validation\set_data_validation.R)
 dataset.type <- "diagnostics"
 
 set_up_data_sglt2_dpp4 <- function(dataset.type) {
@@ -33,7 +34,7 @@ set_up_data_sglt2_dpp4 <- function(dataset.type) {
 
 # load original dataset # name - t2d_1stinstance
 #load("/slade/CPRD_data/mastermind_2022/20221110_t2d_1stinstance.Rda")
-load("C:/Users/jmd237/OneDrive - University of Exeter/John/CPRD/mastermind22/20221212_t2d_1stinstance.Rda")
+load(paste0(data_dir,"20221212_t2d_1stinstance.Rda"))
 
 cprd <- t2d_1stinstance
 
@@ -505,13 +506,13 @@ print(table(final.dataset$ethnicity))
 print(table(final.dataset$ethnicity, final.dataset$drugclass))
 print(table(final.dataset$ethnicity16, final.dataset$drugclass))
 
-save(final.dataset,file="C:/Users/jmd237/OneDrive - University of Exeter/John/CPRD/mastermind22/final.dataset.sglt2.dpp4.val.Rda")
+save(final.dataset,file=paste0(data_dir,"final.dataset.sglt2.dpp4.val.Rda"))
 
 #### Load data ####
 
 rm(list=ls())
 #Dataset define in prep
-load("C:/Users/jmd237/OneDrive - University of Exeter/John/CPRD/mastermind22/final.dataset.sglt2.dpp4.val.Rda")
+load(paste0(data_dir,"final.dataset.sglt2.dpp4.val.Rda"))
 #GOLD SGLT2-DPP4 model
 load("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/m1_hba1cmodel.Rdata")
 #GOLD SGLT2-DPP4 model for discontinuation
@@ -519,8 +520,46 @@ load("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vs
 #GOLD SGLT2-DPP4 model for weight
 load("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/m1_weightmodel.Rdata")
 
-#### Useful functions ####
+#### Useful functions and global settings ####
 
+#Global settings
+  pdfwidth <- 14
+  pdfheight <- 10
+  pngwidth <- 3200
+  pngheight <- 2400
+  pngres <- 200
+  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
+                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))
+  tick.hb <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
+  tick.dc <- c(0,5,10,15,20,25,30,35,40)
+  tick.wt <- c(-4,-3,-2,-1,0)
+  B <- 10
+
+#Add dummy legend
+  dummy <- final.dataset %>% 
+    sample_n(1000) %>% 
+    mutate(drugclass = ifelse(drugclass=="SGLT2","SGLT2 inhibitor","DPP-4 inhibitor")) %>%
+    ggplot(aes(x = prehba1c, y = prebmi, group=drugclass)) + 
+    scale_color_manual(values=c("#4118de","#f1a340")) +
+    geom_point(aes(colour=drugclass), size = 1.5) + theme_bw() +
+    theme(legend.text = element_text(colour="black", size=rel(1))) + 
+    theme(legend.title=element_blank())  + 
+    theme(legend.direction = "horizontal", 
+          legend.position = "bottom",
+          legend.box = "horizontal"
+    ) +
+    guides(colour = guide_legend(override.aes = list(size=4)))
+  
+  # Create user-defined function, which extracts legends from ggplots #https://statisticsglobe.com/add-common-legend-to-combined-ggplot2-plots-in-r/
+  extract_legend <- function(my_ggp) {
+    step1 <- ggplot_gtable(ggplot_build(my_ggp))
+    step2 <- which(sapply(step1$grobs, function(x) x$name) == "guide-box")
+    step3 <- step1$grobs[[step2]]
+    return(step3)
+  }
+  # Apply user-defined function to extract legend
+  shared_legend <- extract_legend(dummy)  
+  
 #Define HTE treatment diff plot function
 hist_plot <- function(data,sx,sy,y) {
   #label for hist
@@ -720,18 +759,15 @@ hte_model <- function(data) {
 }
 #Forest plot for calibration comparison within ethnicity
 fp_plot <- function(coef,cim,cip) {
-  tick <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
-  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
   fp <-
     forestplot(row_names,
                mean = coef,
                lower= cim,
                upper = cip,
-               #hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+               hrzl_lines = gpar(col="#444444"),#lineheight=unit(2,'cm'),
                is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,2)),
                #title="c) TZD - Oedema",
-               xticks = tick,
+               xticks = tick.hb,
                zero = 0,
                #boxsize=0.1,
                # graphwidth = unit(2,"inches"),
@@ -760,18 +796,15 @@ fp_plot <- function(coef,cim,cip) {
 }
 #Forest plot for calibration comparison by ethnicity
 fp_plot.eth <- function(coef,cim,cip) {
-  tick <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
-  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
   fp <-
     forestplot(row_names,
                mean = coef,
                lower= cim,
                upper = cip,
-               #hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+               hrzl_lines = gpar(col="#444444"),#lineheight=unit(2,'cm'),
                is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,2)),
                #title="c) TZD - Oedema",
-               xticks = tick,
+               xticks = tick.hb,
                zero = 0,
                #boxsize=0.1,
                # graphwidth = unit(2,"inches"),
@@ -893,20 +926,19 @@ final.dc <- final.dataset %>%
   cip <- data.matrix(insertrow(cip, NA, 5))
   
   
-  tick <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
-  row_names <- matrix(c("Predicted SGLT2i benefit",paste0(intToUtf8(8805),">5 mmol/mol (n=42,057)"), "3-5 mmol/mol (n=19,808)","0-3 mmol/mol (n=21,171)",
+  row_names.n <- matrix(c("Predicted SGLT2i benefit",paste0(intToUtf8(8805),">5 mmol/mol (n=42,057)"), "3-5 mmol/mol (n=19,808)","0-3 mmol/mol (n=21,171)",
                         "Predicted DPP4i benefit","0-3 mmol/mol (n=10,244)",paste0(intToUtf8(8805),"3 mmol/mol (n=4,207)")))
   # pdf.options(reset = TRUE, onefile = FALSE)
   # pdf("treatmenteffectval(3).pdf",width=8,height=6)
   fp <-
-    forestplot(row_names,
+    forestplot(row_names.n,
                mean = coef,
                lower= cim,
                upper = cip,
                hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
                is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,2)),
                #title="c) TZD - Oedema",
-               xticks = tick,
+               xticks = tick.hb,
                zero = 0,
                #boxsize=0.1,
                # graphwidth = unit(2,"inches"),
@@ -1606,21 +1638,22 @@ fp.eth <- wrap_elements(p1) + wrap_elements(p2) + #/ wrap_elements(p3) +
   plot_annotation("Left=uncalibrated, Right=recalibrated intercept")#, Bottom=recalibrated slope & intercept")
 #fp.eth 
 
-pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/fp.eth_aurum_recal_both.pdf",width=8,height=12)
+grDevices::cairo_pdf(paste0(output_dir,"/fp.eth_recal_both.pdf"),width=8,height=12)
 fp.eth 
-dev.off()  
+dev.off()
 
-pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/fp.eth_aurum_uncal.pdf",width=8,height=6)
+grDevices::cairo_pdf(paste0(output_dir,"/fp.eth_uncal.pdf"),width=8,height=12)
 wrap_elements(p1)
-dev.off()  
+dev.off()
 
-pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/fp.eth_aurum_recal.pdf",width=8,height=6)
+# pdf.options(reset = TRUE, onefile = FALSE)
+# pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/fp.eth_recal.pdf",width=8,height=6)
+# wrap_elements(p2)
+# dev.off()  
+
+grDevices::cairo_pdf(paste0(output_dir,"/fp.eth_recal.pdf"),width=8,height=12)
 wrap_elements(p2)
-dev.off()  
-
+dev.off()
 
 #### save other outputs #####
 
@@ -1652,10 +1685,10 @@ hist.eth
 #                   subtitle="Top=uncalibrated, Middle=recalibrated intercept, Bottom=recalibrated slope & intercept")
 
 pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/hist.eth_aurum_recal.pdf",width=8,height=8)
-hist.eth
-dev.off() 
 
+grDevices::cairo_pdf(paste0(output_dir,"/hist.eth_recal.pdf"),width=8,height=8)
+hist.eth
+dev.off()
 
 #uncalibrated
 hist.white.uncal.p <- wrap_elements(hist.white.uncal+plot_annotation(title = "White", theme = thm))
@@ -1670,11 +1703,9 @@ hist.eth <-
   hist.mixed.other.uncal.p +
   plot_layout(ncol = 2) 
 
-pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/hist.eth_aurum_uncal.pdf",width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"/hist.eth_uncal.pdf"),width=8,height=8)
 hist.eth
-dev.off() 
-
+dev.off()
 
 #Calibration plot
 
@@ -1691,11 +1722,9 @@ cal.eth <-
   cal.mixed.other.recal.p +
   plot_layout(ncol = 2) 
 
-
-pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/cal.eth_aurum_recal.pdf",width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"/cal.eth_recal.pdf"),width=8,height=8)
 cal.eth
-dev.off()  
+dev.off()
 
 #Uncalibrated
 cal.white.uncal.p <- wrap_elements(cal.white.uncal+plot_annotation(title = "White", theme = thm))
@@ -1710,11 +1739,9 @@ cal.eth <-
   cal.mixed.other.uncal.p +
   plot_layout(ncol = 2) 
 
-
-pdf.options(reset = TRUE, onefile = FALSE)
-pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/cal.eth_aurum_uncal.pdf",width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"/cal.eth_uncal.pdf"),width=8,height=8)
 cal.eth
-dev.off()  
+dev.off()
 
 ##### R2 and ATE recalibration (exploratory only) ######
 
@@ -2006,20 +2033,17 @@ c.benefit + 1.96*c.benefit.se
                       mean(data$preddisonDPP4),quantile(data$preddisonDPP4,c(0.025)),quantile(data$preddisonDPP4,c(0.975)))
     DPP4.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
-    final.dis <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
+    final.dis.pred <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
     df.lab <- c("SGLT2.5","SGLT2.3","SGLT2.0","DPP4.0","DPP4.3")
-    final.dis6m <- cbind(df.lab,final.dis)
-    final.dis6m.p <- final.dis6m %>% 
+    final.dis.pred <- cbind(df.lab,final.dis.pred)
+    final.dis.pred.p <- final.dis.pred %>% 
       add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
       add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
     
     #res table
-    dc.res[[i]] <- final.dis6m.p
+    dc.res[[i]] <- final.dis.pred.p
     
     #plot
-    tick <- c(0,5,10,15,20,25,30,35,40)
-    row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                          "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
     coef = data.matrix(cbind(final.dis6m.p[,2]*100,final.dis6m.p[,5]*100))
     cim = data.matrix(cbind(final.dis6m.p[,3]*100,final.dis6m.p[,6]*100))
     cip = data.matrix(cbind(final.dis6m.p[,4]*100,final.dis6m.p[,7]*100))
@@ -2030,7 +2054,7 @@ c.benefit + 1.96*c.benefit.se
                  upper = cip,,
                  hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
                  is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-                 xticks = tick,
+                 xticks = tick.dc,
                  zero = 0,
                  #boxsize=0.1,
                  # graphwidth = unit(2,"inches"),
@@ -2069,17 +2093,20 @@ c.benefit + 1.96*c.benefit.se
   dc.res[3]
   dc.res[4]
   
-  pdf.options(reset = TRUE, onefile = FALSE)
-  pdf(paste0(output_dir,"dc_eth_aurum_recal_predicted.pdf"),width=16,height=12)
+  grDevices::cairo_pdf(paste0(output_dir,"dc_eth_recal_predicted.pdf"),width=pdfwidth,height=pdfheight)
   dc.eth
   dev.off()
-
+  
+  png(paste0(output_dir,"dc_eth_recal_predicted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+  dc.eth
+  dev.off()
+  
   dc.res[[1]]$eth = "White"
   dc.res[[2]]$eth = "Asian"
   dc.res[[3]]$eth = "Black"
   dc.res[[4]]$eth = "Mixed or Other"
   dc.res.pred <- dc.res %>% bind_rows(dc.res) %>% filter(!is.na(df.lab))
-  write.csv(dc.res.pred,file=paste0(output_dir,"dc_eth_aurum_recal_predicted.csv"))
+  write.csv(dc.res.pred,file=paste0(output_dir,"dc_eth_recal_predicted.csv"))
   
   #rename table outputs to compare obs vs pred
   dc.res.pred <- dc.res
@@ -2257,10 +2284,7 @@ c.benefit + 1.96*c.benefit.se
   
   dc.plot <- list()
   
-  tick <- c(0,5,10,15,20,25,30,35,40)
-  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
-  
+
   for(i in 1:4) 
   { 
     #Subgroups by predicted treatment difference
@@ -2279,7 +2303,7 @@ c.benefit + 1.96*c.benefit.se
                  upper = cip,
                  hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
                  is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-                 xticks = tick,
+                 xticks = tick.dc,
                  zero = 0,
                  #boxsize=0.1,
                  # graphwidth = unit(2,"inches"),
@@ -2315,12 +2339,15 @@ c.benefit + 1.96*c.benefit.se
   
   dc.eth.obs
   
-  pdf.options(reset = TRUE, onefile = FALSE)
-  pdf(paste0(output_dir,"dc_eth_aurum_recal_observed_unadjusted.pdf"),width=16,height=12)
+  grDevices::cairo_pdf(paste0(output_dir,"dc_eth_recal_observed_unadjusted.pdf"),width=pdfwidth,height=pdfheight)
   dc.eth.obs
   dev.off()
   
-  write.csv(dc.res.unadjusted,file=paste0(output_dir,"dc_eth_aurum_recal_observed_unadjusted.csv"))
+  png(paste0(output_dir,"dc_eth_recal_observed_unadjusted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+  dc.eth.obs
+  dev.off()
+  
+  write.csv(dc.res.unadjusted,file=paste0(output_dir,"dc_eth_recal_observed_unadjusted.csv"))
 
   #rename table outputs to compare obs vs pred
   dc.res.obs <- dc.res.unadjusted
@@ -2360,7 +2387,6 @@ c.benefit + 1.96*c.benefit.se
     )
   
 
-  B <- 1000
   n=nrow(final.dc)
   
   dc.res <- list()
@@ -2435,10 +2461,6 @@ c.benefit + 1.96*c.benefit.se
   
   dc.plot <- list()
   
-  tick <- c(0,5,10,15,20,25,30,35,40)
-  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
-  
   for(i in 1:4) 
   { 
     #Subgroups by predicted treatment difference
@@ -2457,7 +2479,7 @@ c.benefit + 1.96*c.benefit.se
                  upper = cip,
                  hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
                  is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-                 xticks = tick,
+                 xticks = tick.dc,
                  zero = 0,
                  #boxsize=0.1,
                  # graphwidth = unit(2,"inches"),
@@ -2493,12 +2515,15 @@ c.benefit + 1.96*c.benefit.se
   
   dc.eth.obs.adj
   
-  pdf.options(reset = TRUE, onefile = FALSE)
-  pdf(paste0(output_dir,"dc_eth_aurum_recal_observed_adjusted.pdf"),width=16,height=12)
+  grDevices::cairo_pdf(paste0(output_dir,"dc_eth_recal_observed_adjusted.pdf"),width=pdfwidth,height=pdfheight)
+  dc.eth.obs.adj
+  dev.off()
+  
+  png(paste0(output_dir,"dc_eth_recal_observed_adjusted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
   dc.eth.obs.adj
   dev.off()
 
-  write.csv(dc.res.adjusted,file=paste0(output_dir,"dc_eth_aurum_recal_observed_adjusted.csv"))
+  write.csv(dc.res.adjusted,file=paste0(output_dir,"dc_eth_recal_observed_adjusted.csv"))
   
  ####Explore obs vs pred difference
   # dc.res.white.obs <- dc.res.obs %>% 
@@ -2598,11 +2623,11 @@ c.benefit + 1.96*c.benefit.se
 
 #Predict weight change on each drug using GOLD model
   final.wt$drug <- "DPP4"
-  final.wt$predwtonDPP4 <- predict(m.wt, newdata=final.wt, se.fit=F)
+  final.wt$predwtonDPP4 <- predict(mwt, newdata=final.wt, se.fit=F)
   final.wt$drug <- "SGLT2"
-  final.wt$predwtonSGLT2 <- predict(m.wt, newdata=final.wt, se.fit=F)
+  final.wt$predwtonSGLT2 <- predict(mwt, newdata=final.wt, se.fit=F)
   final.wt$drug <- final.wt$drugclass
-  final.wt$predwtdiffsglt2dpp4 <- abs(final.wt$predwtonSGLT2-final.wt$predwtonDPP4)
+  final.wt$predwtdiffsglt2dpp4 <- final.wt$predwtonSGLT2-final.wt$predwtonDPP4
   describe(final.wt$predwtdiffsglt2dpp4)
   hist(final.wt$predwtdiffsglt2dpp4)
   
@@ -2650,20 +2675,17 @@ c.benefit + 1.96*c.benefit.se
                       mean(data$predwtonDPP4),quantile(data$predwtonDPP4,c(0.025)),quantile(data$predwtonDPP4,c(0.975)))
     DPP4.3 <- df %>% dplyr::rename(SGLT2.est=Var1,SGLT2.lci=Var2,SGLT2.uci=Var3,DPP4.est=Var4,DPP4.lci=Var5,DPP4.uci=Var6) 
     
-    final.wt <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
+    final.wt.obs <- rbind(SGLT2.5,SGLT2.3,SGLT2.0,DPP4.0,DPP4.3)
     df.lab <- c("SGLT2.5","SGLT2.3","SGLT2.0","DPP4.0","DPP4.3")
-    final.wt <- cbind(df.lab,final.wt)
-    final.wt.p <- final.wt6m %>% 
+    final.wt.obs <- cbind(df.lab,final.wt.obs)
+    final.wt.obs.p <- final.wt.obs %>% 
       add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
       add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
     
     #res table
-    wt.res[[i]] <- final.wt.p
+    wt.res[[i]] <- final.wt.obs.p
     
     #plot
-    tick <- c(0,5,10,15,20,25,30,35,40)
-    row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                          "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
     coef = data.matrix(cbind(final.wt.p[,2],final.wt.p[,5]))
     cim = data.matrix(cbind(final.wt.p[,3],final.wt.p[,6]))
     cip = data.matrix(cbind(final.wt.p[,4],final.wt.p[,7]))
@@ -2674,7 +2696,7 @@ c.benefit + 1.96*c.benefit.se
                  upper = cip,,
                  hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
                  is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-                 xticks = tick,
+                 xticks = tick.wt,
                  zero = 0,
                  #boxsize=0.1,
                  # graphwidth = unit(2,"inches"),
@@ -2699,19 +2721,22 @@ c.benefit + 1.96*c.benefit.se
   }  
   
 #Plot together
-  p.white <- grid2grob(print(dc.plot[[1]]))
-  p.asian <- grid2grob(print(dc.plot[[2]]))
-  p.black <- grid2grob(print(dc.plot[[3]]))
-  p.mixed.other <- grid2grob(print(dc.plot[[4]]))
+  p.white <- grid2grob(print(wt.plot[[1]]))
+  p.asian <- grid2grob(print(wt.plot[[2]]))
+  p.black <- grid2grob(print(wt.plot[[3]]))
+  p.mixed.other <- grid2grob(print(wt.plot[[4]]))
   
-  wt.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
+  wt.eth.pred <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
     (wrap_elements(p.black) + wrap_elements(p.mixed.other))
   
-  wt.eth
+  wt.eth.pred
   
-  pdf.options(reset = TRUE, onefile = FALSE)
-  pdf(paste0(output_dir,"wt_eth_aurum_recal_predicted.pdf"),width=16,height=12)
-  wt.eth
+  grDevices::cairo_pdf(paste0(output_dir,"wt_eth_recal_predicted.pdf"),width=pdfwidth,height=pdfheight)
+  wt.eth.pred
+  dev.off()
+  
+  png(paste0(output_dir,"wt_eth_recal_predicted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+  wt.eth.pred
   dev.off()
   
   wt.res[[1]]$eth = "White"
@@ -2719,7 +2744,7 @@ c.benefit + 1.96*c.benefit.se
   wt.res[[3]]$eth = "Black"
   wt.res[[4]]$eth = "Mixed or Other"
   wt.res.pred <- wt.res %>% bind_rows(wt.res) %>% filter(!is.na(df.lab))
-  write.csv(wt.res.pred,file=paste0(output_dir,"wtc_eth_aurum_recal_predicted.csv"))  
+  write.csv(wt.res.pred,file=paste0(output_dir,"wt_eth_recal_predicted.csv"))  
   
 #### Observed weight, by ethnicity and HbA1c benefit subgroup
   
@@ -2754,10 +2779,6 @@ c.benefit + 1.96*c.benefit.se
   
   wt.plot <- list()
   
-  tick <- c(-4,-3,-2,-1,0)
-  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))  
-  
   for(i in 1:4) 
   { 
     #Subgroups by predicted treatment difference
@@ -2776,7 +2797,7 @@ c.benefit + 1.96*c.benefit.se
                  upper = cip,
                  hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
                  is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-                 xticks = tick,
+                 xticks = tick.wt,
                  zero = 0,
                  #boxsize=0.1,
                  # graphwidth = unit(2,"inches"),
@@ -2812,12 +2833,15 @@ c.benefit + 1.96*c.benefit.se
   
   wt.eth.obs
   
-  pdf.options(reset = TRUE, onefile = FALSE)
-  pdf(paste0(output_dir,"wt_eth_aurum_recal_observed_unadjusted.pdf"),width=16,height=12)
+  grDevices::cairo_pdf(paste0(output_dir,"wt_eth_recal_observed_unadjusted.pdf"),width=pdfwidth,height=pdfheight)
   wt.eth.obs
   dev.off()
   
-  write.csv(wt.res.unadjusted,file=paste0(output_dir,"wt_eth_aurum_recal_observed_unadjusted.csv"))
+  png(paste0(output_dir,"wt_eth_recal_observed_unadjusted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+  wt.eth.obs
+  dev.off()
+  
+  write.csv(wt.res.unadjusted,file=paste0(output_dir,"wt_eth_recal_observed_unadjusted.csv"))
   
   #rename table outputs to compare obs vs pred
   wt.res.obs <- wt.res.unadjusted
@@ -2850,7 +2874,6 @@ c.benefit + 1.96*c.benefit.se
     )
   
   #Bootstrap predicted means
-  B <- 1000
   n=nrow(final.wt)
   
   wt.res <- list()
@@ -2921,10 +2944,6 @@ c.benefit + 1.96*c.benefit.se
   
   wt.plot <- list()
   
-  tick <- c(-4,-3,-2,-1,0)
-  row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
-                        "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))
-  
   for(i in 1:4) 
   { 
     #Subgroups by predicted treatment difference
@@ -2944,7 +2963,7 @@ c.benefit + 1.96*c.benefit.se
                  #legend = c("SGLT2i","DPP4i"),
                  hrzl_lines = gpar(col="#444444"),#,lineheight=unit(2,'cm'))
                  is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
-                 xticks = tick,
+                 xticks = tick.wt,
                  zero = 0,
                  #boxsize=0.1,
                  # graphwidth = unit(2,"inches"),
@@ -2968,54 +2987,26 @@ c.benefit + 1.96*c.benefit.se
     
   }  
   
-  #Add dummy legend
-  dummy <- final.hb %>% 
-    sample_n(1000) %>% 
-    mutate(drugclass = ifelse(drugclass=="SGLT2","SGLT2 inhibitor","DPP-4 inhibitor")) %>%
-    ggplot(aes(x = prehba1cmmol, y = prebmi, group=drugclass)) + 
-    scale_color_manual(values=c("#4118de","#f1a340")) +
-    geom_point(aes(colour=drugclass), size = 1.5) + theme_bw() +
-    theme(legend.text = element_text(colour="black", size=rel(1))) + 
-    theme(legend.title=element_blank())  + 
-    theme(legend.direction = "horizontal", 
-          legend.position = "bottom",
-          legend.box = "horizontal"
-    ) +
-    guides(colour = guide_legend(override.aes = list(size=4)))
-  
-  # Create user-defined function, which extracts legends from ggplots #https://statisticsglobe.com/add-common-legend-to-combined-ggplot2-plots-in-r/
-  extract_legend <- function(my_ggp) {
-    step1 <- ggplot_gtable(ggplot_build(my_ggp))
-    step2 <- which(sapply(step1$grobs, function(x) x$name) == "guide-box")
-    step3 <- step1$grobs[[step2]]
-    return(step3)
-  }
-  # Apply user-defined function to extract legend
-  shared_legend <- extract_legend(dummy)
-  
   #Plot together
   p.white <- grid2grob(print(wt.plot[[1]]))
   p.asian <- grid2grob(print(wt.plot[[2]]))
   p.black <- grid2grob(print(wt.plot[[3]]))
   p.mixed.other <- grid2grob(print(wt.plot[[4]]))
   
-  wt.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
+  wt.eth.obs.adj <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
     (wrap_elements(p.black) + wrap_elements(p.mixed.other)) /
     shared_legend +
     plot_layout(height=c(10,10,1))
   
-  wt.eth
+  wt.eth.obs.adj
   
   #Save
-  grDevices::cairo_pdf(paste0(output_dir,"wt_eth_aurum_recal_observed_adjusted.pdf"),width=14,height=10)
-  wt.eth
+  grDevices::cairo_pdf(paste0(output_dir,"wt_eth_recal_observed_adjusted.pdf"))
+  wt.eth.obs.adj
+  dev.off()
+
+  png(paste0(output_dir,"wt_eth_recal_observed_adjusted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+  wt.eth.obs.adj
   dev.off()
   
-  png(paste0(output_dir,"wt_eth_aurum_recal_observed_adjusted.png"),width=3200,height=2400,res=200,restoreConsole=TRUE)
-  wt.eth
-  dev.off()
-  
-  write.csv(wt.res.adjusted,file=paste0(output_dir,"wt_eth_aurum_recal_observed_adjusted.csv"))
-  
-  wt.res.obs <- wt.res.adjusted
-  
+  write.csv(wt.res.adjusted,file=paste0(output_dir,"wt_eth_recal_observed_adjusted.csv"))
