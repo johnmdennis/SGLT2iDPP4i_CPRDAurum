@@ -510,7 +510,6 @@ save(final.dataset,file=paste0(data_dir,"final.dataset.sglt2.dpp4.val.Rda"))
 
 #### Load data ####
 
-rm(list=ls())
 #Dataset define in prep
 load(paste0(data_dir,"final.dataset.sglt2.dpp4.val.Rda"))
 #GOLD SGLT2-DPP4 model
@@ -531,9 +530,10 @@ load("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vs
   row_names <- matrix(c("Predicted SGLT2i glycaemic benefit",paste0(intToUtf8(8805),"5 mmol/mol"), "3-5 mmol/mol","0-3 mmol/mol",
                         "Predicted DPP4i glycaemic benefit","0-3 mmol/mol", paste0(intToUtf8(8805),"3 mmol/mol")))
   tick.hb <- c(-10,-7.5,-5,-2.5,0,2.5,5,7.5, 10)
+  tick.hb.resp <- c(-18,-15,-12,-9,-6,-3,0,3)
   tick.dc <- c(0,5,10,15,20,25,30,35,40)
   tick.wt <- c(-4,-3,-2,-1,0)
-  B <- 10
+  B <- 1000
 
 #Add dummy legend
   dummy <- final.dataset %>% 
@@ -627,7 +627,7 @@ hte_plot <- function(data,pred,obs,obslowerci,obsupperci,ymin.ymax) {
     geom_abline(intercept=0,slope=1, color="red", lwd=0.75) + ggtitle("") +
     geom_point(alpha=1) + theme_classic() +
     geom_errorbar(aes_string(ymin=obslowerci, ymax=obsupperci), colour="black", width=.1) +
-    ylab("Decile average achieved HbA1c (mmol/mol)") + xlab("Predicted HbA1c (mmol/mol)") +
+    ylab("Observed HbA1c difference (mmol/mol)*") + xlab("Predicted HbA1c difference (mmol/mol)") +
     scale_x_continuous(limits=c(ymin,ymax),breaks=c(seq(ymin,ymax,by=2))) +
     scale_y_continuous(limits=c(ymin,ymax),oob=rescale_none,breaks=c(seq(ymin,ymax,by=2))) + 
     # scale_x_continuous(limits=c(ymin,ymax),breaks=c(seq(yminr,ymaxr,by=2))) +
@@ -740,19 +740,19 @@ hte_model <- function(data) {
                             hba1c_diff.obs.adj,lower.adj,upper.adj))
   
   #unadj
-  # plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
-  # hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci") 
+  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
+  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
   # #simple adj
   # plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.sim,lci=lower.sim,uci=upper.sim)
   # hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci") 
   #splie adj
-  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
-  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")  
+  # plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+  # hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")  
   
   #outputs
   hist <- hist_plot(final,-2.5,2.3,1100)
   hte <- hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")  
-  res.list <- res.list %>% filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall")  %>%
+  res.list <- res.list %>% filter(modelname=="unadj" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall")  %>%
     mutate(order=c(1,5,2,3,4,6,7)) %>% 
     arrange(order) 
   return(list(hist,hte,res.list))
@@ -775,7 +775,7 @@ fp_plot <- function(coef,cim,cip) {
                ci.vertices=TRUE,
                col=fpColors(box=c("#66c2a5","#fc8d62","#8da0cb"), lines=c("#66c2a5","#fc8d62","#8da0cb"), zero = "gray50"),
                #lty.ci = c(1,2,3,4),
-               xlab="Average HbA1c difference (mmol/mol; negative favours SGLT2i)",cex=1,
+               xlab="Observed HbA1c difference (mmol/mol)* [negative favours SGLT2i]",cex=1,
                new_page = TRUE,
                fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
                boxsize = .2, # We set the box size to better visualize the type
@@ -812,7 +812,7 @@ fp_plot.eth <- function(coef,cim,cip) {
                ci.vertices=TRUE,
                col=fpColors(box=c("#66c2a5","#fc8d62","#8da0cb","#752302"), lines=c("#66c2a5","#fc8d62","#8da0cb","#752302"), zero = "gray50"),
                #lty.ci = c(1,2,3,4),
-               xlab="Average HbA1c difference (mmol/mol; negative favours SGLT2i)",cex=1,
+               xlab="Observed HbA1c difference (mmol/mol)* [negative favours SGLT2i]",cex=1,
                new_page = TRUE,
                fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI, fpDrawDiamondCI, fpDrawPointCI),
                boxsize = .1, # We set the box size to better visualize the type
@@ -825,7 +825,7 @@ fp_plot.eth <- function(coef,cim,cip) {
                #   r = unit(.1, "snpc"),
                #   gp = gpar(col = "#CCCCCC", lwd = 1.5))
                legend = c("White (77.8%)", "Asian (13.7%)", "Black (4.2%)", "Mixed/Other (2.4%)"),#,
-               legend_args = fpLegend(pos = list(x=.850, y=0.80))#, 
+               legend_args = fpLegend(pos = list(x=.850, y=0.95))#, 
                #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
                #xlog = TRUE
     )
@@ -1638,20 +1638,27 @@ fp.eth <- wrap_elements(p1) + wrap_elements(p2) + #/ wrap_elements(p3) +
   plot_annotation("Left=uncalibrated, Right=recalibrated intercept")#, Bottom=recalibrated slope & intercept")
 #fp.eth 
 
-grDevices::cairo_pdf(paste0(output_dir,"/fp.eth_recal_both.pdf"),width=8,height=12)
+grDevices::cairo_pdf(paste0(output_dir,"fp.eth_recal_both.pdf"),width=20,height=8)
 fp.eth 
 dev.off()
 
-grDevices::cairo_pdf(paste0(output_dir,"/fp.eth_uncal.pdf"),width=8,height=12)
+png(paste0(output_dir,"fp.eth_recal_both.png"),width=pngwidth,height=1250,res=pngres,restoreConsole=TRUE)
+fp.eth 
+dev.off()
+
+grDevices::cairo_pdf(paste0(output_dir,"fp.eth_uncal.pdf"),width=10,height=8)
 wrap_elements(p1)
 dev.off()
 
-# pdf.options(reset = TRUE, onefile = FALSE)
-# pdf("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vsDPP4/results/fp.eth_recal.pdf",width=8,height=6)
-# wrap_elements(p2)
-# dev.off()  
+png(paste0(output_dir,"fp.eth_uncal.png"),width=1800,height=1250,res=pngres,restoreConsole=TRUE)
+wrap_elements(p1)
+dev.off()
 
-grDevices::cairo_pdf(paste0(output_dir,"/fp.eth_recal.pdf"),width=8,height=12)
+grDevices::cairo_pdf(paste0(output_dir,"fp.eth_recal.pdf"),width=10,height=8)
+wrap_elements(p2)
+dev.off()
+
+png(paste0(output_dir,"fp.eth_recal.png"),width=1800,height=1250,res=pngres,restoreConsole=TRUE)
 wrap_elements(p2)
 dev.off()
 
@@ -1684,9 +1691,7 @@ hist.eth
 #   plot_annotation(title="White,                                                      Asian,                                                      Black,                                                      Mixed/Other",
 #                   subtitle="Top=uncalibrated, Middle=recalibrated intercept, Bottom=recalibrated slope & intercept")
 
-pdf.options(reset = TRUE, onefile = FALSE)
-
-grDevices::cairo_pdf(paste0(output_dir,"/hist.eth_recal.pdf"),width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"hist.eth_recal.pdf"),width=8,height=8)
 hist.eth
 dev.off()
 
@@ -1703,7 +1708,11 @@ hist.eth <-
   hist.mixed.other.uncal.p +
   plot_layout(ncol = 2) 
 
-grDevices::cairo_pdf(paste0(output_dir,"/hist.eth_uncal.pdf"),width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"hist.eth_uncal.pdf"),width=8,height=8)
+hist.eth
+dev.off()
+
+png(paste0(output_dir,"hist.eth_uncal.png"),width=1800,height=1800,res=pngres,restoreConsole=TRUE)
 hist.eth
 dev.off()
 
@@ -1722,7 +1731,11 @@ cal.eth <-
   cal.mixed.other.recal.p +
   plot_layout(ncol = 2) 
 
-grDevices::cairo_pdf(paste0(output_dir,"/cal.eth_recal.pdf"),width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"cal.eth_recal.pdf"),width=8,height=8)
+cal.eth
+dev.off()
+
+png(paste0(output_dir,"cal.eth_recal.png"),width=1800,height=1800,res=pngres,restoreConsole=TRUE)
 cal.eth
 dev.off()
 
@@ -1739,9 +1752,282 @@ cal.eth <-
   cal.mixed.other.uncal.p +
   plot_layout(ncol = 2) 
 
-grDevices::cairo_pdf(paste0(output_dir,"/cal.eth_uncal.pdf"),width=8,height=8)
+grDevices::cairo_pdf(paste0(output_dir,"cal.eth_uncal.pdf"),width=8,height=8)
 cal.eth
 dev.off()
+
+png(paste0(output_dir,"cal.eth_uncal.png"),width=1800,height=1800,res=pngres,restoreConsole=TRUE)
+cal.eth
+dev.off()
+
+#### HbA1c response ####
+  
+  #Variable prep
+
+  #Collapse ethnicity
+  final.hb <- final.hb %>% mutate(ethnicity.backup = ethnicity,
+                                  ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
+  describe(final.hb$ethnicity)
+  
+  final.hb<- final.hb %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal)-0.01,-5,-3,0,3,max(hba1c_diff.recal)+0.01)),
+                                 hba1c.change=posthba1c_final-prehba1cmmol)
+  
+  #Unadjusted
+  
+  hb.res.unadjusted <- final.hb %>% 
+    mutate(hba1c.change=posthba1c_final-prehba1cmmol) %>%
+    dplyr::group_by(ethnicity,hba1c.breaks,drugclass) %>% 
+    dplyr::summarise(n=length(hba1c.change),
+                     hba1c.resp = mean(hba1c.change),
+                     lci = mean(hba1c.change) - (1.96*(sd(hba1c.change)/sqrt(length(hba1c.change)))),
+                     uci = mean(hba1c.change) + (1.96*(sd(hba1c.change)/sqrt(length(hba1c.change))))) %>%
+    select(ethnicity,hba1c.breaks,drugclass,n,hba1c.resp,lci,uci)
+  
+  #Long to wide for plotting
+  hb.res.unadjusted <- hb.res.unadjusted %>% pivot_wider(
+    names_from = drugclass,
+    values_from = c(n,hba1c.resp,lci,uci)
+  )
+
+  #hb.res.unadjusted$diff <- hb.res.unadjusted$hba1c.change_SGLT2- hb.res.unadjusted$hba1c.change_DPP4
+
+  #Plot observed and 95% CI by ethnicity and HbA1c defined subgroup
+  white <- hb.res.unadjusted %>% filter(ethnicity=="White") 
+  asian <- hb.res.unadjusted %>% filter(ethnicity=="South Asian")
+  black <- hb.res.unadjusted %>% filter(ethnicity=="Black") 
+  mixed <- hb.res.unadjusted %>% filter(ethnicity=="mixed.other") 
+  
+  L <- list(white,asian,black,mixed)
+  
+  names(L) <- c("White",
+                "Asian",
+                "Black",
+                "Mixed or Other")
+  
+  hb.plot <- list()
+  
+  
+  for(i in 1:4) 
+  { 
+    #Subgroups by predicted treatment difference
+    plotdata <- L[[i]] %>% ungroup() %>% as.data.frame()  %>%
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+    
+    #plot
+    coef = data.matrix(cbind(plotdata[,6],plotdata[,5]))
+    cim = data.matrix(cbind(plotdata[,8],plotdata[,7]))
+    cip = data.matrix(cbind(plotdata[,10],plotdata[,9]))
+    
+    hb.plot[[i]] <-
+      forestplot(row_names,
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,
+                 hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick.hb.resp,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Average glycaemic response (mmol/mol)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .2, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend = c("SGLT2i","DPP4i"),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                 #xlog = TRUE
+      )
+    
+  }  
+  
+  
+  #Plot together
+  p.hb.white <- grid2grob(print(hb.plot[[1]]))
+  p.hb.asian <- grid2grob(print(hb.plot[[2]]))
+  p.hb.black <- grid2grob(print(hb.plot[[3]]))
+  p.hb.mixed.other <- grid2grob(print(hb.plot[[4]]))
+  
+  hb.eth.obs <- (wrap_elements(p.hb.white) + wrap_elements(p.hb.asian)) /
+    (wrap_elements(p.hb.black) + wrap_elements(p.hb.mixed.other))/
+    shared_legend +
+    plot_layout(height=c(10,10,1))
+  
+  hb.eth.obs
+  
+  grDevices::cairo_pdf(paste0(output_dir,"hb_eth_recal_observed_unadjusted.pdf"),width=pdfwidth,height=pdfheight)
+  hb.eth.obs
+  dev.off()
+  
+  png(paste0(output_dir,"hb_eth_recal_observed_unadjusted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+  hb.eth.obs
+  dev.off()
+  
+  write.csv(hb.res.unadjusted,file=paste0(output_dir,"hb_eth_recal_observed_unadjusted.csv"))
+  
+  #rename table outputs to compare obs vs pred
+  hb.res.obs <- hb.res.unadjusted
+
+#### Adjusted
+
+  #Mean prediction
+  m.hb.obs <- ols(hba1c.change~drug*hba1c.breaks*ethnicity + prehba1cmmol + drugline + ncurrtx,data=final.hb,x=T,y=T)
+  
+  #Predict weight on each drug de novo
+  final.hb$drug <- "DPP4"
+  final.hb$DPP4.hb <- predict(m.hb.obs, newdata=final.hb, se.fit=F)
+  final.hb$drug <- "SGLT2"
+  final.hb$SGLT2.hb <- predict(m.hb.obs, newdata=final.hb, se.fit=F)
+  final.hb$sglt2.dpp4.hb.diff <- final.hb$SGLT2.hb-final.hb$DPP4.hb
+  describe(final.hb$sglt2.dpp4.hb.diff)
+  hist(final.hb$sglt2.dpp4.hb.diff)
+  final.hb$drug <- final.hb$drugclass
+  
+  hb.res.overall <- final.hb %>% 
+    group_by(ethnicity,hba1c.breaks) %>% 
+    dplyr::summarise(
+      DPP4.hb = mean(DPP4.hb),
+      SGLT2.hb = mean(SGLT2.hb),
+      sglt2.dpp4.hb.diff = mean(sglt2.dpp4.hb.diff)
+    )
+  
+  #Bootstrap predicted means
+  n=nrow(final.hb)
+  
+  hb.res <- list()
+  
+  for(b in 1:B){
+    i = sample(x = 1:n, size = n, replace = TRUE) ## sample indices
+    temp = final.hb[i,] ## temp data set
+    temp_model =   ols(hba1c.change~drug*hba1c.breaks*ethnicity + prehba1cmmol + drugline + ncurrtx,data=final.hb,x=T,y=T)
+    temp$drug <- "DPP4"
+    temp$DPP4.hb <-  predict(temp_model, newdata=temp, se.fit=F)
+    temp$drug <- "SGLT2"
+    temp$SGLT2.hb <- predict(temp_model, newdata=temp, se.fit=F)
+    temp$sglt2.dpp4.hb.diff <- temp$SGLT2.hb-temp$DPP4.hb
+    
+    res <- temp %>% 
+      group_by(ethnicity,hba1c.breaks) %>% 
+      dplyr::summarise(
+        DPP4.hb = mean(DPP4.hb),
+        SGLT2.hb = mean(SGLT2.hb),
+        sglt2.dpp4.hb.diff = mean(sglt2.dpp4.hb.diff)
+      )
+    
+    #res table
+    hb.res[[b]] <- res
+  }
+  
+  #Derive the bootstrapped CIs for the mean predictions for each subgrup
+  hb.res.ci <- bind_rows(hb.res, .id = "bs_run") %>% 
+    group_by(ethnicity,hba1c.breaks) %>% 
+    dplyr::summarise(
+      #DPP4.hb = mean(DPP4.hb),
+      DPP4.hb.lci = quantile(DPP4.hb,probs=0.025),
+      DPP4.hb.uci = quantile(DPP4.hb,probs=0.975),
+      #SGLT2.hb = mean(SGLT2.hb),
+      SGLT2.hb.lci = quantile(SGLT2.hb,probs=0.025),
+      SGLT2.hb.uci = quantile(SGLT2.hb,probs=0.975),
+      #sglt2.dpp4.hb.diff = mean(sglt2.dpp4.hb.diff),
+      sglt2.dpp4.hb.diff.lci = quantile(sglt2.dpp4.hb.diff,probs=0.025),
+      sglt2.dpp4.hb.diff.uci = quantile(sglt2.dpp4.hb.diff,probs=0.975),
+    )
+  
+  
+  hb.res.adjusted <- left_join(hb.res.overall,hb.res.ci,by=c("ethnicity","hba1c.breaks"))
+  tail(hb.res.adjusted)
+  
+  #Plot mean and 95% interval of prediction by ethnicity and HbA1c defined subgroup
+  white <- hb.res.adjusted %>% filter(ethnicity=="White") 
+  asian <- hb.res.adjusted %>% filter(ethnicity=="South Asian")
+  black <- hb.res.adjusted %>% filter(ethnicity=="Black") 
+  mixed <- hb.res.adjusted %>% filter(ethnicity=="mixed.other") 
+  
+  L <- list(white,asian,black,mixed)
+  
+  names(L) <- c("White",
+                "Asian",
+                "Black",
+                "Mixed or Other")
+  
+  hb.plot <- list()
+  
+  for(i in 1:4) 
+  { 
+    #Subgroups by predicted treatment difference
+    plotdata <- L[[i]] %>% ungroup() %>% as.data.frame()  %>%
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 1) %>% 
+      add_row(!!! setNames(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),names(.)), .before = 5) 
+    
+    #plot
+    coef = data.matrix(cbind(plotdata[,4],plotdata[,3]))
+    cim = data.matrix(cbind(plotdata[,8],plotdata[,6]))
+    cip = data.matrix(cbind(plotdata[,9],plotdata[,7]))
+    hb.plot[[i]] <-
+      forestplot(row_names,
+                 mean = coef,
+                 lower= cim,
+                 upper = cip,
+                 hrzl_lines = gpar(col="#444444"),lineheight=unit(2,'cm'),
+                 is.summary = c(TRUE,rep(FALSE,3),TRUE,rep(FALSE,3)),
+                 xticks = tick.hb.resp,
+                 zero = 0,
+                 #boxsize=0.1,
+                 # graphwidth = unit(2,"inches"),
+                 # lineheight = unit(0.7,"inches"),
+                 ci.vertices=TRUE,
+                 col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
+                 lty.ci = c(1,2),           ,
+                 xlab="Average glycaemic response (mmol/mol)",cex=1,
+                 title = names(L[i]),
+                 new_page = TRUE,
+                 fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
+                 boxsize = .2, # We set the box size to better visualize the type
+                 #line.margin = .1, # We need to add this to avoid crowding
+                 txt_gp = fpTxtGp(legend  = gpar(cex = 1),xlab  = gpar(cex = 1),summary=gpar(cex = 1), ticks  = gpar(cex = 1), title=gpar(cex=1.3))
+                 #txt_gp = fpTxtGp(label= gpar(cex = 0.7),ticks  = gpar(cex = 0.7),xlab  = gpar(cex = 0.7)),
+                 #legend = c("SGLT2i","DPP4i"),
+                 #legend_args = fpLegend(pos = list(x=.70, y=0.95))#, 
+                 #gp=gpar(col="#CCCCCC", fill="#F9F9F9"))#,
+                 #xlog = TRUE
+      )
+    
+  }  
+
+#Plot together
+p.white <- grid2grob(print(hb.plot[[1]]))
+p.asian <- grid2grob(print(hb.plot[[2]]))
+p.black <- grid2grob(print(hb.plot[[3]]))
+p.mixed.other <- grid2grob(print(hb.plot[[4]]))
+
+hb.eth.obs.adj <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
+  (wrap_elements(p.black) + wrap_elements(p.mixed.other)) /
+  shared_legend +
+  plot_layout(height=c(10,10,1))
+
+hb.eth.obs.adj
+
+#Save
+grDevices::cairo_pdf(paste0(output_dir,"hb_eth_recal_observed_adjusted.pdf"),width=pdfwidth,height=pdfheight)
+hb.eth.obs.adj
+dev.off()
+
+png(paste0(output_dir,"hb_eth_recal_observed_adjusted.png"),width=pngwidth,height=pngheight,res=pngres,restoreConsole=TRUE)
+hb.eth.obs.adj
+dev.off()
+
+write.csv(hb.res.adjusted,file=paste0(output_dir,"hb_eth_recal_observed_adjusted.csv"))
+
+
 
 ##### R2 and ATE recalibration (exploratory only) ######
 
@@ -2044,9 +2330,9 @@ c.benefit + 1.96*c.benefit.se
     dc.res[[i]] <- final.dis.pred.p
     
     #plot
-    coef = data.matrix(cbind(final.dis6m.p[,2]*100,final.dis6m.p[,5]*100))
-    cim = data.matrix(cbind(final.dis6m.p[,3]*100,final.dis6m.p[,6]*100))
-    cip = data.matrix(cbind(final.dis6m.p[,4]*100,final.dis6m.p[,7]*100))
+    coef = data.matrix(cbind(final.dis.pred.p[,2]*100,final.dis.pred.p[,5]*100))
+    cim = data.matrix(cbind(final.dis.pred.p[,3]*100,final.dis.pred.p[,6]*100))
+    cip = data.matrix(cbind(final.dis.pred.p[,4]*100,final.dis.pred.p[,7]*100))
     dc.plot[[i]] <-
       forestplot(row_names,
                  mean = coef,
@@ -2062,7 +2348,7 @@ c.benefit + 1.96*c.benefit.se
                  ci.vertices=TRUE,
                  col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
                  lty.ci = c(1,2),           ,
-                 xlab="Early therapy discontinuation (%)",cex=1,
+                 xlab="Proportion discontinuing therapy (%)",cex=1,
                  title = names(L[i]),
                  new_page = TRUE,
                  fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
@@ -2311,7 +2597,7 @@ c.benefit + 1.96*c.benefit.se
                  ci.vertices=TRUE,
                  col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
                  lty.ci = c(1,2),           ,
-                 xlab="Early therapy discontinuation (%)",cex=1,
+                 xlab="Proportion discontinuing therapy (%)",cex=1,
                  title = names(L[i]),
                  new_page = TRUE,
                  fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
@@ -2487,7 +2773,7 @@ c.benefit + 1.96*c.benefit.se
                  ci.vertices=TRUE,
                  col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
                  lty.ci = c(1,2),           ,
-                 xlab="Early therapy discontinuation (%)",cex=1,
+                 xlab="Proportion discontinuing therapy (%)",cex=1,
                  title = names(L[i]),
                  new_page = TRUE,
                  fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
@@ -2704,7 +2990,7 @@ c.benefit + 1.96*c.benefit.se
                  ci.vertices=TRUE,
                  col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
                  lty.ci = c(1,2),           ,
-                 xlab="Weight change (kg)",cex=1,
+                 xlab="Average weight change (kg)",cex=1,
                  title = names(L[i]),
                  new_page = TRUE,
                  fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
@@ -2805,7 +3091,7 @@ c.benefit + 1.96*c.benefit.se
                  ci.vertices=TRUE,
                  col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
                  lty.ci = c(1,2),           ,
-                 xlab="Weight change (kg)",cex=1,
+                 xlab="Average weight change (kg)",cex=1,
                  title = names(L[i]),
                  new_page = TRUE,
                  fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
@@ -2971,7 +3257,7 @@ c.benefit + 1.96*c.benefit.se
                  ci.vertices=TRUE,
                  col=fpColors(box=c("#f1a340","#4118de"), lines=c("#f1a340","#4118de"), zero = "gray50"),
                  lty.ci = c(1,2),           ,
-                 xlab="Weight change (kg)",cex=1,
+                 xlab="Average weight change (kg)",cex=1,
                  title = names(L[i]),
                  new_page = TRUE,
                  fn.ci_norm = c(fpDrawNormalCI, fpDrawCircleCI),
