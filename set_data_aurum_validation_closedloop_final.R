@@ -3,7 +3,7 @@ rm(list=ls())
 require(tidyverse)
 library(rms)
 library(tableone)
-library(plyr)
+#library(plyr)
 library(ggthemes)
 library(forestplot)
 library(broom)
@@ -11,6 +11,7 @@ library(ggplotify)
 library(patchwork)
 library(scales)
 library(forcats)
+library(marginaleffects)
 
 output_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2023_SGLT2DPP4Aurum/results/" 
 data_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/CPRD/mastermind22/"
@@ -37,7 +38,6 @@ set_up_data_sglt2_dpp4 <- function(dataset.type) {
 load(paste0(data_dir,"20221212_t2d_1stinstance.Rda"))
 
 cprd <- t2d_1stinstance
-
 
 ##### Select only SGLT-2 and DPP4
 
@@ -330,7 +330,7 @@ cprd <- cprd %>%
 final.dataset <- cprd %>%
   select(
     # information regarding patient
-    patid, pated, multi_drug_start, timeprevcombo, drugsubstances,
+    patid, pated, multi_drug_start, timeprevcombo, drugsubstances,gp_record_end,death_date,
     # response hba1c
     posthba1cfinal,
     # therapies of interest
@@ -338,7 +338,7 @@ final.dataset <- cprd %>%
     # Sociodemographic features
     agetx, sex, t2dmduration, ethnicity,  ethnicity16, deprivation, smoke, prehospitalisation,
     # Diabetes treatment 
-    drugline, ncurrtx, hba1cmonth, dstartdate, dstopdate, yrdrugstart,
+    drugline, ncurrtx, hba1cmonth, dstartdate, dstopdate, yrdrugstart, dcstopdate,
     # Biomarkers
     prehba1c, prebmi, preegfr, preacr, prealbuminblood, prealt, preast, prebilirubin, prefastingglucose,
     prehaematocrit, prehaemoglobin, prehdl, premap, pretotalcholesterol, pretriglyceride,
@@ -350,7 +350,9 @@ final.dataset <- cprd %>%
     # Discontinuation
     stopdrug_6m_3mFU,
     # eGFR analysis
-    postegfr12m, postegfr6m
+    postegfr12m, postegfr6m,
+    # mv complications outcome
+    postdrug_first_diabeticnephropathy, postdrug_first_neuropathy, postdrug_first_retinopathy
   ) %>%
   as.data.frame()
 
@@ -506,6 +508,149 @@ print(table(final.dataset$ethnicity))
 print(table(final.dataset$ethnicity, final.dataset$drugclass))
 print(table(final.dataset$ethnicity16, final.dataset$drugclass))
 
+#####  IMPORT ALL SGLT2, DPP4, GLP1 + TZD STARTS FOR LATER CENSORING (SGLT2 for DPP4SU arm only)
+
+### Combine with main dataset to get next SGLT2/GLP1/TZD/DPP4 start date
+### Also get latest SGLT2 stop date before drug start for DPP4 arm in case needed for sensitivity analysis
+
+load(paste0(data_dir,"20221212_t2d_all_drug_periods.Rda"))
+
+later_sglt2 <- final.dataset %>%
+  select(patid, dstartdate) %>%
+  inner_join((t2d_all_drug_periods %>%
+                filter(drugclass=="SGLT2") %>%
+                select(patid, next_sglt2=dstartdate)), by="patid") %>%
+  filter(next_sglt2>dstartdate) %>%
+  group_by(patid, dstartdate) %>%
+  summarise(next_sglt2_start=min(next_sglt2, na.rm=TRUE)) %>%
+  ungroup()
+
+later_dpp4 <- final.dataset%>%
+  select(patid, dstartdate) %>%
+  inner_join((t2d_all_drug_periods %>%
+                filter(drugclass=="DPP4") %>%
+                select(patid, next_dpp4=dstartdate)), by="patid") %>%
+  filter(next_dpp4>dstartdate) %>%
+  group_by(patid, dstartdate) %>%
+  summarise(next_dpp4_start=min(next_dpp4, na.rm=TRUE)) %>%
+  ungroup()
+
+later_glp1 <- final.dataset%>%
+  select(patid, dstartdate) %>%
+  inner_join((t2d_all_drug_periods %>%
+                filter(drugclass=="GLP1") %>%
+                select(patid, next_glp1=dstartdate)), by="patid") %>%
+  filter(next_glp1>dstartdate) %>%
+  group_by(patid, dstartdate) %>%
+  summarise(next_glp1_start=min(next_glp1, na.rm=TRUE)) %>%
+  ungroup()
+
+later_tzd <- final.dataset %>%
+  select(patid, dstartdate) %>%
+  inner_join((t2d_all_drug_periods %>%
+                filter(drugclass=="TZD") %>%
+                select(patid, next_tzd=dstartdate)), by="patid") %>%
+  filter(next_tzd>dstartdate) %>%
+  group_by(patid, dstartdate) %>%
+  summarise(next_tzd_start=min(next_tzd, na.rm=TRUE)) %>%
+  ungroup()
+
+last_sglt2_stop <- final.dataset %>%
+  select(patid, dstartdate) %>%
+  inner_join((t2d_all_drug_periods %>%
+                filter(drugclass=="SGLT2") %>%
+                select(patid, last_sglt2=dstopdate)), by="patid") %>%
+  filter(last_sglt2<dstartdate) %>%
+  group_by(patid, dstartdate) %>%
+  summarise(last_sglt2_stop=min(last_sglt2, na.rm=TRUE)) %>%
+  ungroup()
+
+final.dataset <- final.dataset %>%
+  left_join(later_sglt2, by=c("patid", "dstartdate")) %>%
+  left_join(later_dpp4, by=c("patid", "dstartdate")) %>%
+  left_join(later_glp1, by=c("patid", "dstartdate")) %>%
+  left_join(later_tzd, by=c("patid", "dstartdate")) %>%
+  left_join(last_sglt2_stop, by=c("patid", "dstartdate"))
+
+#### Microvascular complications
+#Pre-existing composite, and survival analysis setup
+
+final.dataset <- final.dataset %>%
+  mutate(predrug.mv = ifelse(prediabeticnephropathy=="Yes" | preneuropathy=="Yes" | preretinopathy=="Yes", 1, 0),
+         postdrug.mv=pmin(postdrug_first_diabeticnephropathy, postdrug_first_neuropathy, postdrug_first_retinopathy, na.rm=TRUE)) 
+
+#Check
+# table(final.dataset$prediabeticnephropathy)
+# table(final.dataset$preneuropathy)
+# table(final.dataset$preretinopathy)
+# table(final.dataset$predrug.mv)
+
+#ITT MV complications
+
+# Find censoring dates - earliest of:
+## 5 years from dstartdate
+## Death
+## Start SGLT2 (DPP4 arm), or DPP4 (SGLT2 arm)
+## End of GP records
+## MV complications
+
+final.dataset <- final.dataset %>%
+  mutate(five_years_post_dstart=dstartdate+(365.25*5),
+         mv_itt_censdate=if_else(drugclass=="SGLT2", 
+                                 pmin(five_years_post_dstart, 
+                                      death_date, 
+                                      next_dpp4_start, 
+                                      gp_record_end, 
+                                      postdrug.mv, na.rm=TRUE),
+                                 if_else(drugclass=="DPP4", 
+                                         pmin(five_years_post_dstart, 
+                                              death_date, 
+                                              next_sglt2_start, 
+                                              gp_record_end, 
+                                              postdrug.mv, na.rm=TRUE), 
+                                         as.Date(NA))),
+         
+         mv_itt_censvar=ifelse((!is.na(postdrug.mv) & mv_itt_censdate==postdrug.mv), 1, 0),
+         
+         mv_itt_censtime_yrs=as.numeric(difftime(mv_itt_censdate, dstartdate, unit="days"))/365.25)
+
+# describe(final.dataset$mv_itt_censdate)
+# describe(final.dataset$mv_itt_censvar)
+# describe(final.dataset$mv_itt_censtime_yrs)
+
+
+#PP MV complications
+
+# Find censoring dates - earliest of:
+## 5 years from dstartdate
+## Death
+## Any change in glucose-lowering therapy
+## End of GP records
+## MV complications
+
+final.dataset <- final.dataset %>%
+  mutate(mv_pp_censdate=if_else(drugclass=="SGLT2", 
+                                pmin(five_years_post_dstart, 
+                                     death_date, 
+                                     gp_record_end,
+                                     postdrug.mv,
+                                     dcstopdate, na.rm=TRUE),
+                                if_else(drugclass=="DPP4", 
+                                        pmin(five_years_post_dstart, 
+                                             death_date, 
+                                             gp_record_end, 
+                                             postdrug.mv,
+                                             dcstopdate, na.rm=TRUE), as.Date(NA))),
+         
+         mv_pp_censvar=ifelse(!is.na(postdrug.mv) & mv_pp_censdate==postdrug.mv, 1, 0),
+         
+         mv_pp_censtime_yrs=as.numeric(difftime(mv_pp_censdate, dstartdate, unit="days"))/365.25)
+
+# describe(final.dataset$mv_pp_censdate)
+# describe(final.dataset$mv_pp_censvar)
+# describe(final.dataset$mv_pp_censtime_yrs)
+
+#Save
 save(final.dataset,file=paste0(data_dir,"final.dataset.sglt2.dpp4.val.Rda"))
 
 #### Load data ####
@@ -522,6 +667,14 @@ load("C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2019_SGLT2vs
 #### Useful functions and global settings ####
 
 #Global settings
+  
+  #model.name <- "unadj"
+  #OR
+  model.name <- "full"
+  #OR
+  #model.name <- "simple"
+  
+  
   pdfwidth <- 14
   pdfheight <- 10
   pngwidth <- 3200
@@ -675,7 +828,7 @@ hte_model <- function(data) {
   res.lab <- c(rep("overall",3),rep("sglt2.best",3),rep("dpp4.best",3),rep("sglt.best5",3),rep("sglt.best3",3),rep("sglt.best0-3",3),
                rep("dpp4.best0-3",3),rep("dpp4.best3",3))
   res.list <- data.frame(res.lab,res.list) %>% dplyr::select(-column_label,-datasetname)
-  res.list %>% dplyr::filter(modelname=="full") #final adjusted list
+  res.list %>% dplyr::filter(modelname==model.name) #final adjusted list
   
   #Calibration plot HTE
   
@@ -684,15 +837,16 @@ hte_model <- function(data) {
   final <- final %>% mutate(hba1c_diff.q = ntile(hba1c_diff, 10))    
   
   #define dataset with predicted values
-  t1 <- ddply(final, "hba1c_diff.q", dplyr::summarise,
-              N    = length(hba1c_diff),
-              hba1c_diff.pred = mean(hba1c_diff))
+  t1 <- final %>% 
+    group_by(hba1c_diff.q) %>%
+    dplyr::summarise(N = length(hba1c_diff),
+                     hba1c_diff.pred = mean(hba1c_diff))
   
   #check some patients actually prescribed both drugs in each tenth
-  ddply(final, c("hba1c_diff.q","drugclass"), dplyr::summarise,
-        N    = length(posthba1c_final),
-        posthba1c_final.m = mean(posthba1c_final),
-        se = sd(posthba1c_final)/sqrt((length(posthba1c_final))))
+  # ddply(final, c("hba1c_diff.q","drugclass"), dplyr::summarise,
+  #       N    = length(posthba1c_final),
+  #       posthba1c_final.m = mean(posthba1c_final),
+  #       se = sd(posthba1c_final)/sqrt((length(posthba1c_final))))
   
   #obs vs pred, by decile of predicted treatment difference
   #For Formula 1-3
@@ -740,19 +894,19 @@ hte_model <- function(data) {
                             hba1c_diff.obs.adj,lower.adj,upper.adj))
   
   #unadj
-  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
-  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+  # plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
+  # hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
   # #simple adj
   # plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.sim,lci=lower.sim,uci=upper.sim)
   # hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci") 
   #splie adj
-  # plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
-  # hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")  
+  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
   
   #outputs
   hist <- hist_plot(final,-2.5,2.3,1100)
   hte <- hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")  
-  res.list <- res.list %>% filter(modelname=="unadj" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall")  %>%
+  res.list <- res.list %>% filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall")  %>%
     mutate(order=c(1,5,2,3,4,6,7)) %>% 
     arrange(order) 
   return(list(hist,hte,res.list))
@@ -833,13 +987,24 @@ fp_plot.eth <- function(coef,cim,cip) {
 }
 
 #### Define model formula ####
-formula1 <- "posthba1c_final~factor(drugclass)"
-formula2 <- "posthba1c_final~factor(drugclass)+prehba1cmmol+ncurrtx+drugline+rcs(hba1cmonth,3)+egfr_ckdepi+prealtlog"
-formula3 <- "posthba1c_final~factor(drugclass)+rcs(prehba1cmmol,3)+ncurrtx+drugline+rcs(hba1cmonth,3)+rcs(egfr_ckdepi,3)+rcs(prealtlog,3)+rcs(agetx,3)+rcs(prebmi,3)"
+formula1 <- "posthba1c_final~drugclass"
+#formula2 <- "posthba1c_final~factor(drugclass)+prehba1cmmol+ncurrtx+drugline+rcs(hba1cmonth,3)+egfr_ckdepi+prealtlog"
+formula2 <- "posthba1c_final~drugclass+ncurrtx+drugline"
+formula3 <- "posthba1c_final~drugclass+rcs(prehba1cmmol,3)+ncurrtx+drugline+rcs(hba1cmonth,3)+rcs(egfr_ckdepi,3)+rcs(prealtlog,3)+rcs(agetx,3)+rcs(prebmi,3)"
 modelname <- c("unadj","simple","full")
 f <- as.list(c(formula1,formula2,formula3))
 
-#### Define each of the HbA1c, weight and discontinuation cohorts ####
+#### Define each of the HbA1c, weight, discontinuation and mv outcome cohorts ####
+
+#Overall cohort
+
+#Set drugline as factor
+final.dataset <- final.dataset %>% mutate(drugclass=as.factor(drugclass),
+                                          drugline=as.factor(drugline))
+
+#Collapse ethnicity
+final.dataset <- final.dataset %>% mutate(ethnicity.backup = ethnicity,
+                                ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
 
 #HbA1c cohort
 final.hb <- final.dataset %>%
@@ -852,6 +1017,9 @@ final.hb <- final.dataset %>%
   drop_na() #%>% 
 
 final.hb.backup <- final.hb
+
+#Proportion of patients by ethnicity 
+prop.tab.hb <- round(prop.table(table(final.hb$ethnicity))*100,1)
 
 #Weight cohort
 final.wt <- final.dataset %>%
@@ -872,6 +1040,14 @@ final.dc <- final.dataset %>%
   mutate(prealtlog = log(prealtlog)) %>% 
   drop_na() #%>% 
 
+#MV complications cohort
+final.mv <- final.dataset %>%
+  dplyr::rename("prealtlog"="prealt",
+                "prehba1cmmol"="prehba1c",
+                "egfr_ckdepi"="preegfr") %>%
+  mutate(prealtlog = log(prealtlog)) %>% 
+  filter(predrug.mv==0)
+
 ##### Overall calibration uncalibrated ####  
 
 #Predict outcomes
@@ -890,10 +1066,10 @@ final.dc <- final.dataset %>%
   hist(final.hb$hba1c_diff,breaks=50); abline(v = 0, col="black", lwd=3, lty=2)
   table(final.hb$bestdrug)
   
-  ddply(final.hb, "bestdrug", dplyr::summarise,
-        N    = length(hba1c_diff),
-        hba1c_diff.sd = sd(hba1c_diff),
-        hba1c_diff = mean(hba1c_diff))
+  # ddply(final.hb, "bestdrug", dplyr::summarise,
+  #       N    = length(hba1c_diff),
+  #       hba1c_diff.sd = sd(hba1c_diff),
+  #       hba1c_diff = mean(hba1c_diff))
 
 #Run HTE models and extract coefs
   hte.output.overall <- hte_model(final.hb)
@@ -901,7 +1077,7 @@ final.dc <- final.dataset %>%
 #outputs
   hist.overall <- hte.output.overall[1]
   hte.overall <- hte.output.overall[2]  
-  res.list.overall <- data.frame(hte.output.overall[3]) %>% filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall") 
+  res.list.overall <- data.frame(hte.output.overall[3]) %>% filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall") 
   hist.overall  
   hte.overall
   res.list.overall
@@ -1146,7 +1322,7 @@ DPP4i.Black
 cohort <- "DPP4i.Mixed.Other"
 
 dataset <- final.hb %>% 
-  filter((ethnicity=="Mixed"|ethnicity=="Other") & drugclass=="DPP4") %>%
+  filter((ethnicity=="mixed.other") & drugclass=="DPP4") %>%
   sample_frac(sample_frac)
 
 observed <- dataset$posthba1c_final
@@ -1211,7 +1387,7 @@ SGLT2i.Black
 cohort <- "SGLT2i.Mixed.Other"
 
 dataset <- final.hb %>% 
-  filter((ethnicity=="Mixed"|ethnicity=="Other") & drugclass=="SGLT2") %>%
+  filter((ethnicity=="mixed.other") & drugclass=="SGLT2") %>%
   sample_frac(sample_frac)
 
 observed <- dataset$posthba1c_final
@@ -1228,6 +1404,10 @@ closedtest.final.hb
 
 ctfm <- closedtest.final.hb %>% filter(model.selected=="Yes")
 
+ctfm.save <- closedtest.final.hb %>% filter(model.selected=="Yes") %>% 
+  select("Therapy/Ethnicity arm"=cohort,"Number of people"=n,"Model selected" = model, "Updated intercept (if required)" = intercept.w.ci)
+write.csv(ctfm,file=paste0(output_dir,"closedloopmodelupdate.csv"))
+
 
 #Update predictions
 # final.hb <- final.hb %>% mutate(drug=drugclass) %>% mutate(drugclass="DPP4")
@@ -1242,7 +1422,7 @@ ctfm <- closedtest.final.hb %>% filter(model.selected=="Yes")
 final.hb <- final.hb %>% mutate(DPP4.pred.lm.recal=ifelse(ethnicity == "White",DPP4.pred.lm.uncal+ctfm$intercept[1],
                                                     ifelse(ethnicity == "South Asian",DPP4.pred.lm.uncal+ctfm$intercept[3],
                                                            ifelse(ethnicity == "Black",DPP4.pred.lm.uncal+ctfm$intercept[5],
-                                                                  ifelse(ethnicity == "Mixed"|ethnicity=="Other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
+                                                                  ifelse(ethnicity == "mixed.other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
                                                                   )))),
                           SGLT2.pred.lm.recal=ifelse(ethnicity == "White",SGLT2.pred.lm.uncal+ctfm$intercept[2],SGLT2.pred.lm.uncal),
                           # ifelse(ethnicity == "South Asian",SGLT2.pred.lm+ctfm$intercept[4],
@@ -1294,13 +1474,13 @@ cal.overall.recal
 
 #HTE subgroups
 res.list.overall.gold <- data.frame(overall.gold[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Uncalibrated")
 res.list.overall.recal <- data.frame(overall.recal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Recalibrated")
 # res.list.overall.intlp <- data.frame(overall.intlp[3]) %>% 
-#   filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+#   filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
 #   mutate(analysis="Recalibrated slope & intercept")
 res.list.overall.comparison <- rbind(res.list.overall.gold,res.list.overall.recal)#,res.list.overall.intlp)
 res.list.overall.comparison
@@ -1361,13 +1541,13 @@ cal.asian.both
 
 #HTE subgroups
 res.list.overall.uncal <- data.frame(overall.uncal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Uncalibrated")
 res.list.overall.recal <- data.frame(overall.recal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Recalibrated intercept")
 # res.list.overall.recallp <- data.frame(overall.recallp[3]) %>% 
-#   filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+#   filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
 #   mutate(analysis="Recalibrated slope & intercept")
 res.list.overall.comparison <- rbind(res.list.overall.uncal,res.list.overall.recal)#,res.list.overall.recallp)
 res.list.overall.comparison
@@ -1426,13 +1606,13 @@ cal.white.both
 
 #HTE subgroups
 res.list.overall.uncal <- data.frame(overall.uncal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Uncalibrated")
 res.list.overall.recal <- data.frame(overall.recal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Recalibrated intercept")
 # res.list.overall.recallp <- data.frame(overall.recallp[3]) %>% 
-#   filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+#   filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
 #   mutate(analysis="Recalibrated slope & intercept")
 res.list.overall.comparison <- rbind(res.list.overall.uncal,res.list.overall.recal)#,res.list.overall.recallp)
 res.list.overall.comparison
@@ -1491,13 +1671,13 @@ cal.black.both
 
 #HTE subgroups
 res.list.overall.uncal <- data.frame(overall.uncal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Uncalibrated")
 res.list.overall.recal <- data.frame(overall.recal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Recalibrated intercept")
 # res.list.overall.recallp <- data.frame(overall.recallp[3]) %>% 
-#   filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+#   filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
 #   mutate(analysis="Recalibrated slope & intercept")
 res.list.overall.comparison <- rbind(res.list.overall.uncal,res.list.overall.recal)#,res.list.overall.recallp)
 res.list.overall.comparison
@@ -1518,7 +1698,7 @@ fp.black.recal
 val.black.recal <- val
 
 #Mixed.Other
-final <- final.hb %>% filter(ethnicity=="Mixed" | ethnicity=="Other" )
+final <- final.hb %>% filter(ethnicity=="mixed.other")
 
 #uncal model (same as code above)
 final$hba1c_diff <- final$hba1c_diff.uncal #uncal model
@@ -1556,13 +1736,13 @@ cal.mixed.other.both
 
 #HTE subgroups
 res.list.overall.uncal <- data.frame(overall.uncal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Uncalibrated")
 res.list.overall.recal <- data.frame(overall.recal[3]) %>% 
-  filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+  filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
   mutate(analysis="Recalibrated intercept")
 # res.list.overall.recallp <- data.frame(overall.recallp[3]) %>% 
-#   filter(modelname=="full" & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
+#   filter(modelname==model.name & res.lab != "sglt.best10" & res.lab != "dpp4.best5"  & res.lab != "overall" & res.lab != "sglt2.best" & res.lab != "dpp4.best") %>%
 #   mutate(analysis="Recalibrated slope & intercept")
 res.list.overall.comparison <- rbind(res.list.overall.uncal,res.list.overall.recal)#,res.list.overall.recallp)
 res.list.overall.comparison
@@ -1668,10 +1848,10 @@ dev.off()
 
 #recalibrated
 thm <- theme(plot.title = element_text(face = 1, size = 12))
-hist.white.recal.p <- wrap_elements(hist.white.recal+plot_annotation(title = "White", theme = thm))
-hist.asian.recal.p <- wrap_elements(hist.asian.recal+plot_annotation(title = "South Asian", theme = thm))
-hist.black.recal.p <- wrap_elements(hist.black.recal+plot_annotation(title = "Black", theme = thm))
-hist.mixed.other.recal.p <- wrap_elements(hist.mixed.other.recal+plot_annotation(title = "Mixed or Other", theme = thm))
+hist.white.recal.p <- wrap_elements(hist.white.recal+plot_annotation(title = paste0("White (",prop.tab.hb[1],"%)"), theme = thm))
+hist.asian.recal.p <- wrap_elements(hist.asian.recal+plot_annotation(title = paste0("South Asian (",prop.tab.hb[2],"%)"), theme = thm))
+hist.black.recal.p <- wrap_elements(hist.black.recal+plot_annotation(title = paste0("Black (",prop.tab.hb[3],"%)"), theme = thm))
+hist.mixed.other.recal.p <- wrap_elements(hist.mixed.other.recal+plot_annotation(title = paste0("Mixed or Other (",prop.tab.hb[4],"%)"), theme = thm))
 
 hist.eth <- 
   hist.white.recal.p +
@@ -1695,11 +1875,17 @@ grDevices::cairo_pdf(paste0(output_dir,"hist.eth_recal.pdf"),width=8,height=8)
 hist.eth
 dev.off()
 
+png(paste0(output_dir,"hist.eth_recal.png"),width=1800,height=1800,res=pngres,restoreConsole=TRUE)
+hist.eth
+dev.off()
+
+round(prop.table(table(final.hb$ethnicity,final.hb$bestdrug.recal),1)*100,1)
+
 #uncalibrated
-hist.white.uncal.p <- wrap_elements(hist.white.uncal+plot_annotation(title = "White", theme = thm))
-hist.asian.uncal.p <- wrap_elements(hist.asian.uncal+plot_annotation(title = "South Asian", theme = thm))
-hist.black.uncal.p <- wrap_elements(hist.black.uncal+plot_annotation(title = "Black", theme = thm))
-hist.mixed.other.uncal.p <- wrap_elements(hist.mixed.other.uncal+plot_annotation(title = "Mixed or Other", theme = thm))
+hist.white.uncal.p <- wrap_elements(hist.white.uncal+plot_annotation(title = paste0("White (",prop.tab.hb[1],"%)"), theme = thm))
+hist.asian.uncal.p <- wrap_elements(hist.asian.uncal+plot_annotation(title = paste0("South Asian (",prop.tab.hb[2],"%)"), theme = thm))
+hist.black.uncal.p <- wrap_elements(hist.black.uncal+plot_annotation(title = paste0("Black (",prop.tab.hb[3],"%)"), theme = thm))
+hist.mixed.other.uncal.p <- wrap_elements(hist.mixed.other.uncal+plot_annotation(title = paste0("Mixed or Other (",prop.tab.hb[4],"%)"), theme = thm))
 
 hist.eth <- 
   hist.white.uncal.p +
@@ -1719,10 +1905,10 @@ dev.off()
 #Calibration plot
 
 #Recalibrated
-cal.white.recal.p <- wrap_elements(cal.white.recal+plot_annotation(title = "White", theme = thm))
-cal.asian.recal.p <- wrap_elements(cal.asian.recal+plot_annotation(title = "South Asian", theme = thm))
-cal.black.recal.p <- wrap_elements(cal.black.recal+plot_annotation(title = "Black", theme = thm))
-cal.mixed.other.recal.p <- wrap_elements(cal.mixed.other.recal+plot_annotation(title = "Mixed or Other", theme = thm))
+cal.white.recal.p <- wrap_elements(cal.white.recal+plot_annotation(title = paste0("White (",prop.tab.hb[1],"%)"), theme = thm))
+cal.asian.recal.p <- wrap_elements(cal.asian.recal+plot_annotation(title = paste0("South Asian (",prop.tab.hb[2],"%)"), theme = thm))
+cal.black.recal.p <- wrap_elements(cal.black.recal+plot_annotation(title = paste0("Black (",prop.tab.hb[3],"%)"), theme = thm))
+cal.mixed.other.recal.p <- wrap_elements(cal.mixed.other.recal+plot_annotation(title = paste0("Mixed or Other (",prop.tab.hb[4],"%)"), theme = thm))
 
 cal.eth <- 
   cal.white.recal.p +
@@ -1740,10 +1926,10 @@ cal.eth
 dev.off()
 
 #Uncalibrated
-cal.white.uncal.p <- wrap_elements(cal.white.uncal+plot_annotation(title = "White", theme = thm))
-cal.asian.uncal.p <- wrap_elements(cal.asian.uncal+plot_annotation(title = "South Asian", theme = thm))
-cal.black.uncal.p <- wrap_elements(cal.black.uncal+plot_annotation(title = "Black", theme = thm))
-cal.mixed.other.uncal.p <- wrap_elements(cal.mixed.other.uncal+plot_annotation(title = "Mixed or Other", theme = thm))
+cal.white.uncal.p <- wrap_elements(cal.white.uncal+plot_annotation(title = paste0("White (",prop.tab.hb[1],"%)"), theme = thm))
+cal.asian.uncal.p <- wrap_elements(cal.asian.uncal+plot_annotation(title = paste0("South Asian (",prop.tab.hb[2],"%)"), theme = thm))
+cal.black.uncal.p <- wrap_elements(cal.black.uncal+plot_annotation(title = paste0("Black (",prop.tab.hb[3],"%)"), theme = thm))
+cal.mixed.other.uncal.p <- wrap_elements(cal.mixed.other.uncal+plot_annotation(title = paste0("Mixed or Other (",prop.tab.hb[4],"%)"), theme = thm))
 
 cal.eth <- 
   cal.white.uncal.p +
@@ -1760,20 +1946,147 @@ png(paste0(output_dir,"cal.eth_uncal.png"),width=1800,height=1800,res=pngres,res
 cal.eth
 dev.off()
 
+#### HbA1c difference interaction approach ####
+
+# 1: Subset by eth
+# 2: Define deciles for that eth
+# 3: Estimate predicted as the mean predicted HbA1c within each group
+# 4: Estimate observed with hba1c_q*drug interaction adjusted for key variables 
+
+white <- final.hb %>% filter(ethnicity=="White")
+asian <- final.hb %>% filter(ethnicity=="South Asian")
+black <- final.hb %>% filter(ethnicity=="Black")
+mixed.other <- final.hb %>% filter(ethnicity=="mixed.other")
+
+L <- list(white,asian,black,mixed.other)
+
+names(L) <- c("White",
+              "Asian",
+              "Black",
+              "Mixed or Other")
+
+hb.res <- list()
+hb.plot <- list()
+
+formula3.hba1cq <- "posthba1c_final~drugclass*hba1c_diff.q+rcs(prehba1cmmol,3)+ncurrtx+drugline+rcs(hba1cmonth,3)+rcs(egfr_ckdepi,3)+rcs(prealtlog,3)+rcs(agetx,3)+rcs(prebmi,3)"
+
+for(i in 1:4) 
+{ 
+  data  <- L[[i]] %>% mutate(hba1c_diff.q = factor(ntile(hba1c_diff.recal, 10))) 
+  ddist <- datadist(data); options(datadist='ddist') 
+  
+  #define dataset with predicted values
+  t1 <- final %>% 
+    group_by(hba1c_diff.q) %>%
+    dplyr::summarise(N = length(hba1c_diff),
+                     hba1c_diff.pred = mean(hba1c_diff.recal)) %>%
+    mutate(ethnicity=names(L)[[i]])
+  
+  #Model for adjusted observed values
+  m.hb.cal <- ols(as.formula(formula3.hba1cq),data=data,x=T,y=T)
+  
+  #Marginal effects https://vincentarelbundock.github.io/marginaleffects/articles/comparisons.html?q=interactions#interactions-and-cross-contrasts
+  comp <- avg_comparisons(m.hb.cal, variables = "drugclass", by = "hba1c_diff.q")  %>%
+    arrange(as.numeric(hba1c_diff.q)) %>%
+    mutate(ethnicity=names(L)[[i]]) %>%
+    select(ethnicity,hba1c_diff.q,hba1c_diff=estimate,lci=conf.low,uci=conf.high) %>% 
+    as.data.frame()
+  
+  #Merge
+  hb.cal.final <- left_join(comp,t1,by=c("ethnicity","hba1c_diff.q"))
+  
+  #res table
+  hb.res[[i]] <- hb.cal.final
+  
+  #Plot
+  hb.plot[[i]] <-
+    hte_plot(hb.cal.final,"hba1c_diff.pred","hba1c_diff","lci","uci")  
+  
+}   
+
+#Plot together
+p.white <- wrap_elements(grid2grob(print(hb.plot[[1]])))
+p.asian <- wrap_elements(grid2grob(print(hb.plot[[2]])))
+p.black <- wrap_elements(grid2grob(print(hb.plot[[3]])))
+p.mixed.other <- wrap_elements(grid2grob(print(hb.plot[[4]])))
+
+hb.eth.cal <- (
+  wrap_elements(p.white+plot_annotation(title = paste0("White (",prop.tab.hb[1],"%)"), theme = thm)) + 
+    wrap_elements(p.asian+plot_annotation(title = paste0("South Asian (",prop.tab.hb[2],"%)"), theme = thm))) /
+  (
+    wrap_elements(p.black+plot_annotation(title = paste0("Black (",prop.tab.hb[3],"%)"), theme = thm)) + 
+      wrap_elements(p.mixed.other+plot_annotation(title = paste0("Mixed or Other (",prop.tab.hb[4],"%)"), theme = thm)))
+
+hb.eth.cal
+
+grDevices::cairo_pdf(paste0(output_dir,"cal.eth_recal_interaction.pdf"),width=8,height=8)
+hb.eth.cal
+dev.off()
+
+png(paste0(output_dir,"cal.eth_recal_interaction.png"),width=1800,height=1800,res=pngres,restoreConsole=TRUE)
+hb.eth.cal
+dev.off()
+
+hb.res.cal.data <- hb.res %>% bind_rows(hb.res)
+write.csv(hb.res.cal.data,file=paste0(output_dir,"cal.eth_recal_interaction.csv"))  
+
+#Global deciles - not used as won't be deciles for ethnic subgroups
+# #Define tenths
+# final.hb <- final.hb %>% mutate(hba1c_diff.q = factor(ntile(hba1c_diff.recal, 10)))    
+# 
+# #define dataset with predicted values
+# t1 <- ddply(final.hb, c("ethnicity","hba1c_diff.q"), dplyr::summarise,
+#             N    = length(hba1c_diff.recal),
+#             hba1c_diff.pred = mean(hba1c_diff.recal))
+# 
+# #Define observed values #https://grantmcdermott.com/interaction-effects/
+# m.hb.cal <- ols(posthba1c_final~drug*hba1c_diff.q*ethnicity+ prehba1cmmol + ncurrtx,data=final.hb,x=T,y=T)
+# 
+# #Marginal effects https://vincentarelbundock.github.io/marginaleffects/articles/comparisons.html?q=interactions#interactions-and-cross-contrasts
+# comp <- avg_comparisons(m.hb.cal, variables = "drug", by = c("hba1c_diff.q","ethnicity"))  %>%
+#   arrange(ethnicity,as.numeric(hba1c_diff.q)) %>%
+#   select(ethnicity,hba1c_diff.q,hba1c_diff=estimate,lci=conf.low,uci=conf.high) %>% 
+#   as.data.frame()
+# 
+# #Merge
+# hb.cal.final <- left_join(comp,t1,by=c("ethnicity","hba1c_diff.q"))
+# 
+# #Plot
+# plotdata <- hb.cal.final %>% filter(ethnicity=="White")
+# cal.white.recal <- hte_plot(plotdata,"hba1c_diff.pred","hba1c_diff","lci","uci")
+# 
+# plotdata <- hb.cal.final %>% filter(ethnicity=="South Asian")
+# cal.asian.recal <- hte_plot(plotdata,"hba1c_diff.pred","hba1c_diff","lci","uci")
+# 
+# plotdata <- hb.cal.final %>% filter(ethnicity=="Black")
+# cal.black.recal <- hte_plot(plotdata,"hba1c_diff.pred","hba1c_diff","lci","uci")
+# 
+# plotdata <- hb.cal.final %>% filter(ethnicity=="mixed.other")
+# cal.mixed.other.recal <- hte_plot(plotdata,"hba1c_diff.pred","hba1c_diff","lci","uci")
+# 
+# cal.white.recal.p <- wrap_elements(cal.white.recal+plot_annotation(title = "White", theme = thm))
+# cal.asian.recal.p <- wrap_elements(cal.asian.recal+plot_annotation(title = "South Asian", theme = thm))
+# cal.black.recal.p <- wrap_elements(cal.black.recal+plot_annotation(title = "Black", theme = thm))
+# cal.mixed.other.recal.p <- wrap_elements(cal.mixed.other.recal+plot_annotation(title = "Mixed or Other", theme = thm))
+# 
+# cal.eth <- 
+#   cal.white.recal.p +
+#   cal.asian.recal.p + 
+#   cal.black.recal.p + 
+#   cal.mixed.other.recal.p +
+#   plot_layout(ncol = 2) 
+# 
+# #grDevices::cairo_pdf(paste0(output_dir,"cal.eth_recal.pdf"),width=8,height=8)
+# cal.eth
+# #dev.off()
+
 #### HbA1c response ####
   
   #Variable prep
-
-  #Collapse ethnicity
-  final.hb <- final.hb %>% mutate(ethnicity.backup = ethnicity,
-                                  ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
-  describe(final.hb$ethnicity)
-  
   final.hb<- final.hb %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal)-0.01,-5,-3,0,3,max(hba1c_diff.recal)+0.01)),
                                  hba1c.change=posthba1c_final-prehba1cmmol)
   
   #Unadjusted
-  
   hb.res.unadjusted <- final.hb %>% 
     mutate(hba1c.change=posthba1c_final-prehba1cmmol) %>%
     dplyr::group_by(ethnicity,hba1c.breaks,drugclass) %>% 
@@ -2237,7 +2550,7 @@ c.benefit + 1.96*c.benefit.se
   final.dc <- final.dc %>% mutate(DPP4.pred.lm.recal=ifelse(ethnicity == "White",DPP4.pred.lm.uncal+ctfm$intercept[1],
                                                             ifelse(ethnicity == "South Asian",DPP4.pred.lm.uncal+ctfm$intercept[3],
                                                                    ifelse(ethnicity == "Black",DPP4.pred.lm.uncal+ctfm$intercept[5],
-                                                                          ifelse(ethnicity == "Mixed"|ethnicity=="Other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
+                                                                          ifelse(ethnicity == "mixed.other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
                                                                           )))),
                                   SGLT2.pred.lm.recal=ifelse(ethnicity == "White",SGLT2.pred.lm.uncal+ctfm$intercept[2],SGLT2.pred.lm.uncal),
                                   hba1c_diff.recal = SGLT2.pred.lm.recal-DPP4.pred.lm.recal,
@@ -2245,13 +2558,8 @@ c.benefit + 1.96*c.benefit.se
   
   #Generate other variables for modelling
   
-  #Collapse ethnicity
-  final.dc <- final.dc %>% mutate(ethnicity.backup = ethnicity,
-                                  ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
-  describe(final.dc$ethnicity)
-  
   #Define hba1c.breaks based on recalibrated HbA1c outcome
-  final.dc <- final.dc %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal)-0.01,-5,-3,0,3,max(hba1c_diff.recal)+0.01)))
+  final.dc <- final.dc %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal,na.rm=T)-0.01,-5,-3,0,3,max(hba1c_diff.recal,na.rm=T)+0.01)))
   describe(final.dc$hba1c.breaks)
   
   #Define datadist for modelling
@@ -2371,7 +2679,9 @@ c.benefit + 1.96*c.benefit.se
   p.mixed.other <- grid2grob(print(dc.plot[[4]]))
   
   dc.eth <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
-    (wrap_elements(p.black) + wrap_elements(p.mixed.other))
+    (wrap_elements(p.black) + wrap_elements(p.mixed.other)) /
+    shared_legend +
+    plot_layout(height=c(10,10,1))
   
   dc.eth
   dc.res[1]
@@ -2621,7 +2931,9 @@ c.benefit + 1.96*c.benefit.se
   p.dc.mixed.other <- grid2grob(print(dc.plot[[4]]))
   
   dc.eth.obs <- (wrap_elements(p.dc.white) + wrap_elements(p.dc.asian)) /
-    (wrap_elements(p.dc.black) + wrap_elements(p.dc.mixed.other))
+    (wrap_elements(p.dc.black) + wrap_elements(p.dc.mixed.other)) /
+    shared_legend +
+    plot_layout(height=c(10,10,1))
   
   dc.eth.obs
   
@@ -2797,7 +3109,9 @@ c.benefit + 1.96*c.benefit.se
   p.dc.mixed.other <- grid2grob(print(dc.plot[[4]]))
   
   dc.eth.obs.adj <- (wrap_elements(p.dc.white) + wrap_elements(p.dc.asian)) /
-    (wrap_elements(p.dc.black) + wrap_elements(p.dc.mixed.other))
+    (wrap_elements(p.dc.black) + wrap_elements(p.dc.mixed.other)) /
+    shared_legend +
+    plot_layout(height=c(10,10,1))
   
   dc.eth.obs.adj
   
@@ -2878,7 +3192,7 @@ c.benefit + 1.96*c.benefit.se
   final.wt <- final.wt %>% mutate(DPP4.pred.lm.recal=ifelse(ethnicity == "White",DPP4.pred.lm.uncal+ctfm$intercept[1],
                                                             ifelse(ethnicity == "South Asian",DPP4.pred.lm.uncal+ctfm$intercept[3],
                                                                    ifelse(ethnicity == "Black",DPP4.pred.lm.uncal+ctfm$intercept[5],
-                                                                          ifelse(ethnicity == "Mixed"|ethnicity=="Other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
+                                                                          ifelse(ethnicity == "mixed.other",DPP4.pred.lm.uncal+ctfm$intercept[7],NA
                                                                           )))),
                                   SGLT2.pred.lm.recal=ifelse(ethnicity == "White",SGLT2.pred.lm.uncal+ctfm$intercept[2],SGLT2.pred.lm.uncal),
                                   hba1c_diff.recal = SGLT2.pred.lm.recal-DPP4.pred.lm.recal,
@@ -2886,16 +3200,8 @@ c.benefit + 1.96*c.benefit.se
   
 #Generate other variables for modelling
   
-  #Set drugline as factor
-  final.wt <- final.wt %>% mutate(drugline=as.factor(drugline))
-  
-  #Collapse ethnicity
-  final.wt <- final.wt %>% mutate(ethnicity.backup = ethnicity,
-                                  ethnicity=fct_collapse(ethnicity,mixed.other=c("Mixed","Other")))
-  describe(final.wt$ethnicity)
-  
   #Define hba1c.breaks based on recalibrated HbA1c outcome
-  final.wt <- final.wt %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal)-0.01,-5,-3,0,3,max(hba1c_diff.recal)+0.01)))
+  final.wt <- final.wt %>% mutate(hba1c.breaks = cut(hba1c_diff.recal, breaks=c(min(hba1c_diff.recal,na.rm=T)-0.01,-5,-3,0,3,max(hba1c_diff.recal,na.rm=T)+0.01)))
   describe(final.wt$hba1c.breaks)
   
   #Set HbA1c diff to recalibrated HbA1c outcome
@@ -2972,9 +3278,9 @@ c.benefit + 1.96*c.benefit.se
     wt.res[[i]] <- final.wt.obs.p
     
     #plot
-    coef = data.matrix(cbind(final.wt.p[,2],final.wt.p[,5]))
-    cim = data.matrix(cbind(final.wt.p[,3],final.wt.p[,6]))
-    cip = data.matrix(cbind(final.wt.p[,4],final.wt.p[,7]))
+    coef = data.matrix(cbind(final.wt.obs.p[,2],final.wt.obs.p[,5]))
+    cim = data.matrix(cbind(final.wt.obs.p[,3],final.wt.obs.p[,6]))
+    cip = data.matrix(cbind(final.wt.obs.p[,4],final.wt.obs.p[,7]))
     wt.plot[[i]] <-
       forestplot(row_names,
                  mean = coef,
@@ -3013,7 +3319,9 @@ c.benefit + 1.96*c.benefit.se
   p.mixed.other <- grid2grob(print(wt.plot[[4]]))
   
   wt.eth.pred <- (wrap_elements(p.white) + wrap_elements(p.asian)) /
-    (wrap_elements(p.black) + wrap_elements(p.mixed.other))
+    (wrap_elements(p.black) + wrap_elements(p.mixed.other)) /
+    shared_legend +
+    plot_layout(height=c(10,10,1))
   
   wt.eth.pred
   
@@ -3115,7 +3423,9 @@ c.benefit + 1.96*c.benefit.se
   p.wt.mixed.other <- grid2grob(print(wt.plot[[4]]))
   
   wt.eth.obs <- (wrap_elements(p.wt.white) + wrap_elements(p.wt.asian)) /
-    (wrap_elements(p.wt.black) + wrap_elements(p.wt.mixed.other))
+    (wrap_elements(p.wt.black) + wrap_elements(p.wt.mixed.other)) /
+    shared_legend +
+    plot_layout(height=c(10,10,1))
   
   wt.eth.obs
   
