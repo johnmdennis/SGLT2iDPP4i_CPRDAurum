@@ -344,15 +344,15 @@ final.dataset <- cprd %>%
     prehaematocrit, prehaemoglobin, prehdl, premap, pretotalcholesterol, pretriglyceride,
     # Comorbidities
     preangina, precld, prediabeticnephropathy, preheartfailure, prehypertension, preihd, premyocardialinfarction, 
-    preneuropathy, prepad, preretinopathy, prerevasc, prestroke, pretia, preaf,
+    preneuropathy, prepad, preretinopathy, prerevasc, prestroke, pretia, preaf,qrisk2_10yr_score,
     # Weight analysis
     preweight, postweight12m, postweight6m, postweight12mdate, postweight6mdate, postweightfinal,
     # Discontinuation
     stopdrug_6m_3mFU,
     # eGFR analysis
     postegfr12m, postegfr6m,
-    # mv complications outcome
-    postdrug_first_diabeticnephropathy, postdrug_first_neuropathy, postdrug_first_retinopathy
+    # mv complications and HF outcome
+    postdrug_first_diabeticnephropathy, postdrug_first_neuropathy, postdrug_first_retinopathy, postdrug_first_heartfailure, hf_death_any_cause
   ) %>%
   as.data.frame()
 
@@ -580,10 +580,15 @@ final.dataset <- final.dataset %>%
          postdrug.mv=pmin(postdrug_first_diabeticnephropathy, postdrug_first_neuropathy, postdrug_first_retinopathy, na.rm=TRUE)) 
 
 #Check
-# table(final.dataset$prediabeticnephropathy)
-# table(final.dataset$preneuropathy)
-# table(final.dataset$preretinopathy)
-# table(final.dataset$predrug.mv)
+table(final.dataset$prediabeticnephropathy)
+table(final.dataset$preneuropathy)
+table(final.dataset$preretinopathy)
+table(final.dataset$predrug.mv)
+
+describe(final.dataset$postdrug_first_diabeticnephropathy)
+describe(final.dataset$postdrug_first_neuropathy)
+describe(final.dataset$postdrug_first_retinopathy)
+describe(final.dataset$postdrug.mv)
 
 #ITT MV complications
 
@@ -649,6 +654,76 @@ final.dataset <- final.dataset %>%
 # describe(final.dataset$mv_pp_censdate)
 # describe(final.dataset$mv_pp_censvar)
 # describe(final.dataset$mv_pp_censtime_yrs)
+
+
+#### Retinopathy, and survival analysis setup
+
+final.dataset <- final.dataset %>%
+  mutate(predrug.ret = ifelse(preretinopathy=="Yes", 1, 0),
+         postdrug.ret=pmin(postdrug_first_retinopathy, na.rm=TRUE)) 
+
+#Check
+table(final.dataset$preretinopathy)
+table(final.dataset$predrug.ret)
+
+describe(final.dataset$postdrug_first_retinopathy)
+describe(final.dataset$postdrug.ret)
+
+#ITT Retinopathy
+
+# Find censoring dates - earliest of:
+## 5 years from dstartdate
+## Death
+## Start SGLT2 (DPP4 arm), or DPP4 (SGLT2 arm)
+## End of GP records
+## Retinopathy
+
+final.dataset <- final.dataset %>%
+  mutate(five_years_post_dstart=dstartdate+(365.25*5),
+         ret_itt_censdate=if_else(drugclass=="SGLT2", 
+                                 pmin(five_years_post_dstart, 
+                                      death_date, 
+                                      next_dpp4_start, 
+                                      gp_record_end, 
+                                      postdrug.ret, na.rm=TRUE),
+                                 if_else(drugclass=="DPP4", 
+                                         pmin(five_years_post_dstart, 
+                                              death_date, 
+                                              next_sglt2_start, 
+                                              gp_record_end, 
+                                              postdrug.ret, na.rm=TRUE), 
+                                         as.Date(NA))),
+         
+         ret_itt_censvar=ifelse((!is.na(postdrug.ret) & mv_itt_censdate==postdrug.ret), 1, 0),
+         
+         ret_itt_censtime_yrs=as.numeric(difftime(mv_itt_censdate, dstartdate, unit="days"))/365.25)
+
+#PP retinopathy
+
+# Find censoring dates - earliest of:
+## 5 years from dstartdate
+## Death
+## Any change in glucose-lowering therapy
+## End of GP records
+## Retinopathy
+
+final.dataset <- final.dataset %>%
+  mutate(ret_pp_censdate=if_else(drugclass=="SGLT2", 
+                                pmin(five_years_post_dstart, 
+                                     death_date, 
+                                     gp_record_end,
+                                     postdrug.ret,
+                                     dcstopdate, na.rm=TRUE),
+                                if_else(drugclass=="DPP4", 
+                                        pmin(five_years_post_dstart, 
+                                             death_date, 
+                                             gp_record_end, 
+                                             postdrug.ret,
+                                             dcstopdate, na.rm=TRUE), as.Date(NA))),
+         
+         ret_pp_censvar=ifelse(!is.na(postdrug.mv) & mv_pp_censdate==postdrug.mv, 1, 0),
+         
+         ret_pp_censtime_yrs=as.numeric(difftime(mv_pp_censdate, dstartdate, unit="days"))/365.25)
 
 #Save
 save(final.dataset,file=paste0(data_dir,"final.dataset.sglt2.dpp4.val.Rda"))
@@ -1047,6 +1122,14 @@ final.mv <- final.dataset %>%
                 "egfr_ckdepi"="preegfr") %>%
   mutate(prealtlog = log(prealtlog)) %>% 
   filter(predrug.mv==0)
+
+#Retinopathy cohort
+final.ret <- final.dataset %>%
+  dplyr::rename("prealtlog"="prealt",
+                "prehba1cmmol"="prehba1c",
+                "egfr_ckdepi"="preegfr") %>%
+  mutate(prealtlog = log(prealtlog)) %>% 
+  filter(predrug.ret==0)
 
 ##### Overall calibration uncalibrated ####  
 
